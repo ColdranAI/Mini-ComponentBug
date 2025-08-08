@@ -13,24 +13,10 @@ export function isElementInsideCrossOriginIframe(el: Element): boolean {
 export async function pickElement(): Promise<HTMLElement> {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
-    Object.assign(overlay.style, {
-      position: "fixed",
-      inset: "0",
-      zIndex: "2147483647",
-      cursor: "crosshair",
-      background: "rgba(0,0,0,0.05)",
-      pointerEvents: "none",
-    } as CSSStyleDeclaration);
+    overlay.className = "fixed inset-0 z-[2147483647] cursor-crosshair bg-neutral-200/20 pointer-events-none";
 
     const box = document.createElement("div");
-    Object.assign(box.style, {
-      position: "fixed",
-      border: "3px solid #1d4ed8",
-      boxShadow: "0 0 0 2px rgba(29,78,216,0.15) inset",
-      background: "rgba(29,78,216,0.08)",
-      pointerEvents: "none",
-      transform: "translateZ(0)",
-    } as CSSStyleDeclaration);
+    box.className = "fixed border-2 border-neutral-500 bg-neutral-200/20 pointer-events-none";
     overlay.appendChild(box);
     document.body.appendChild(overlay);
 

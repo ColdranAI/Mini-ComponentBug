@@ -95,15 +95,40 @@ export async function POST(req: NextRequest) {
     return new NextResponse("forbidden", { status: 403 });
   }
 
-  const { title, videoUrl, pageUrl, userAgent, targetSelector, targetRegion, capturedElements, env, consoleLogs, notes } =
+  const { title, videoUrl, pageUrl, userAgent, targetSelector, targetRegion, capturedElements, env, consoleLogs, notes, inlineVideo } =
     await req.json();
 
-  if (!videoUrl) {
-    return NextResponse.json({ error: "videoUrl required" }, { status: 400 });
+  let finalVideoUrl = videoUrl as string | undefined;
+  // Optional inline video path: commit small video to repo instead of external storage
+  if (!finalVideoUrl && inlineVideo && inlineVideo.base64 && inlineVideo.contentType) {
+    try {
+      const owner = process.env.GH_OWNER!;
+      const repo = process.env.GH_REPO!;
+      const now = new Date();
+      const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
+      const ext = inlineVideo.contentType.toLowerCase().includes('mp4') ? 'mp4' : 'webm';
+      const path = `issue-assets/recording-${ts}-${Math.random().toString(16).slice(2,8)}.${ext}`;
+      const message = `chore(issue-assets): add recording ${ts}`;
+      const resp = await octo.request('PUT /repos/{owner}/{repo}/contents/{path}', {
+        owner,
+        repo,
+        path,
+        message,
+        content: inlineVideo.base64,
+      });
+      // @ts-ignore
+      finalVideoUrl = resp.data.content?.download_url || resp.data.content?.html_url;
+    } catch (e: any) {
+      return NextResponse.json({ error: 'Failed to inline-upload video to repo', detail: String(e?.message || e) }, { status: 500 });
+    }
+  }
+
+  if (!finalVideoUrl) {
+    return NextResponse.json({ error: "videoUrl or inlineVideo required" }, { status: 400 });
   }
 
   const body = issueBodyTemplate({
-    videoUrl,
+    videoUrl: finalVideoUrl,
     pageUrl,
     userAgent,
     targetSelector,

@@ -203,7 +203,7 @@ async function snapshotCroppedArea(
 
   const isCanvasMostlyTransparent = (canvas: HTMLCanvasElement) => {
     try {
-      const ctx = canvas.getContext("2d");
+      const ctx = canvas.getContext("2d", { willReadFrequently: true } as any) as CanvasRenderingContext2D | null;
       if (!ctx) return false;
       const w = canvas.width;
       const h = canvas.height;
@@ -267,7 +267,7 @@ export function createElementRegionCaptureController(
   opts?: { fps?: number; maxSeconds?: number; maxBytes?: number }
 ) {
   const fps = opts?.fps ?? 8;
-  const maxSeconds = opts?.maxSeconds ?? 30;
+  const maxSeconds = Math.min(opts?.maxSeconds ?? 40, 40);
   const maxBytes = opts?.maxBytes ?? Math.floor(9.5 * 1024 * 1024);
   const bitrate = Math.floor(((maxBytes * 8) / maxSeconds) * 0.9);
 
@@ -459,7 +459,10 @@ export function createElementController(
       if (bytes >= maxBytes && rec!.state === "recording") rec!.stop();
       else chunks.push(e.data);
     };
+    let drawing = false;
     const drawOnce = async () => {
+      if (drawing) return;
+      drawing = true;
       const pageBg = getPageBackgroundColor();
       const rect = el.getBoundingClientRect();
       const sx = Math.floor(rect.left + window.scrollX);
@@ -488,11 +491,12 @@ export function createElementController(
         }
       }
       cleanup();
+      drawing = false;
     };
     // prime a couple frames
     drawOnce();
     setTimeout(drawOnce, 60);
-    rec.start(500);
+    rec.start(250);
     interval = setInterval(async () => {
       try {
         await drawOnce();
@@ -624,11 +628,31 @@ export function createRegionController(
       if (bytes >= maxBytes && rec!.state === "recording") rec!.stop();
       else chunks.push(e.data);
     };
+    const isFullscreenLike =
+      region.left <= 1 &&
+      region.top <= 1 &&
+      Math.abs(region.width - window.innerWidth) <= 2 &&
+      Math.abs(region.height - window.innerHeight) <= 2;
+
+    let drawing = false;
     const drawOnce = async () => {
+      if (drawing) return;
+      drawing = true;
+      // Adapt to viewport if this is a full-screen selection
+      const dynamicW = isFullscreenLike ? window.innerWidth : region.width;
+      const dynamicH = isFullscreenLike ? window.innerHeight : region.height;
+      if (isFullscreenLike) {
+        const targetW = Math.max(2, Math.floor(dynamicW));
+        const targetH = Math.max(2, Math.floor(dynamicH));
+        if (display!.width !== targetW || display!.height !== targetH) {
+          display!.width = targetW;
+          display!.height = targetH;
+        }
+      }
       const sx = Math.floor(region.left + window.scrollX);
       const sy = Math.floor(region.top + window.scrollY);
-      const sw = Math.max(1, Math.floor(region.width));
-      const sh = Math.max(1, Math.floor(region.height));
+      const sw = Math.max(1, Math.floor(dynamicW));
+      const sh = Math.max(1, Math.floor(dynamicH));
       const pageBg = getPageBackgroundColor();
       const { values, cleanup } = markFormElementsAndSnapshotValues();
       const snap = await snapshotCroppedArea(sx, sy, sw, sh, {
@@ -695,6 +719,7 @@ export function createRegionController(
         }
       }
       cleanup();
+      drawing = false;
     };
     // prime frames before starting
     drawOnce();
