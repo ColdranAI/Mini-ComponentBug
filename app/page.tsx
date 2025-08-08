@@ -20,9 +20,13 @@ export default function CanvasRecorderDemo() {
   const [working, setWorking] = useState(false);
   const [selecting, setSelecting] = useState(false);
   const useStorage = ((process as any)?.env?.NEXT_PUBLIC_USE_STORAGE ?? (process as any)?.env?.USE_STORAGE) === "true";
+  const allowDownloads = ((process as any)?.env?.NEXT_PUBLIC_ALLOW_DOWNLOADS ?? (process as any)?.env?.ALLOW_DOWNLOADS) === "true";
   const [notes, setNotes] = useState("");
   const [descModalOpen, setDescModalOpen] = useState(false);
   const [desc, setDesc] = useState("");
+  const [userSubmitted, setUserSubmitted] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
+  const [uploadMessage, setUploadMessage] = useState("");
   const controllerRef = useRef<null | {
     start: () => void;
     stop: () => Promise<Blob>;
@@ -165,6 +169,7 @@ export default function CanvasRecorderDemo() {
     if (!selectedTarget) return;
     setStatus("Recording…");
     setRecording(true);
+    setUserSubmitted(false);
     // Start console capture
     (window as any).__consoleCapture = startConsoleCapture();
     if (selectedTarget.kind === "region") {
@@ -189,88 +194,120 @@ export default function CanvasRecorderDemo() {
       lastBlobRef.current = blob;
       if (blob.size > 9.5 * 1024 * 1024) {
         setStatus("Too large after trim. Downloading locally…");
-        downloadBlob("recording.webm", blob);
+        if (allowDownloads) {
+          downloadBlob("recording.webm", blob);
+        }
         setWorking(false);
         return;
       }
-      // Open description modal (highest z-index) before uploading
+      
+      // Open description modal and wait for user input
+      setUserSubmitted(false);
       setDescModalOpen(true);
-      await new Promise<void>((res) => {
-        const check = () => {
+      
+      // Wait for user to submit or cancel
+      await new Promise<void>((resolve) => {
+        const checkUserAction = () => {
           if (!descModalOpen) {
-            res();
+            resolve();
           } else {
-            setTimeout(check, 50);
+            setTimeout(checkUserAction, 100);
           }
         };
-        setTimeout(check, 50);
+        setTimeout(checkUserAction, 100);
       });
 
-      // Decide upload strategy: small blobs inline; else S3 as before
-      let publicUrl: string | null = null;
-      let inlineVideo: { base64: string; contentType: string } | null = null;
-      if (!useStorage || blob.size <= 1024 * 1024) {
-        // inline to repo
-        const arrayBuf = await blob.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
-        inlineVideo = { base64, contentType: blob.type };
-      } else {
-        setStatus("Uploading to storage…");
-        const presignRes = await fetch("/api/upload-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ contentType: blob.type }),
-        });
-        if (!presignRes.ok) {
-          throw new Error(`presign failed: ${presignRes.status}`);
-        }
-        const pres = await presignRes.json();
-        const putRes = await fetch(pres.uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": blob.type } });
-        if (!putRes.ok) {
-          throw new Error(`upload failed: ${putRes.status}`);
-        }
-        publicUrl = pres.publicUrl;
+      // If user cancelled or didn't provide description, stop here
+      if (!userSubmitted || !desc?.trim()) {
+        setUserSubmitted(false);
+        setWorking(false);
+        return;
       }
-      setStatus("Creating GitHub issue…");
-      const selectorLabel = "(region)";
-      const diag = collectRegionDiagnostics({
-        left: Math.floor(selectedTarget!.rect.left),
-        top: Math.floor(selectedTarget!.rect.top),
-        width: Math.floor(selectedTarget!.rect.width),
-        height: Math.floor(selectedTarget!.rect.height),
-      });
-      const logs = (window as any).__consoleCapture?.getLogs?.() || [];
-      (window as any).__consoleCapture?.stop?.();
-      const issueRes = await fetch("/api/create-issue", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: desc?.trim() ? desc.trim().slice(0, 120) : "User screen recording",
-          videoUrl: publicUrl,
-          pageUrl: location.href,
-          userAgent: navigator.userAgent,
-          targetRegion: diag.region,
-          capturedElements: diag.elements,
-          env: diag.env,
-          consoleLogs: logs,
-          notes: desc,
-          inlineVideo,
-        }),
-      });
-      if (!issueRes.ok) {
-        throw new Error(`issue failed: ${issueRes.status}`);
+
+      // Continue with upload
+      setUploadStatus("uploading");
+      setUploadMessage("Uploading recording...");
+      try {
+        await uploadRecording(blob);
+        setUploadStatus("success");
+        setUploadMessage("Issue created successfully!");
+        setTimeout(() => {
+          setDescModalOpen(false);
+          setUploadStatus("idle");
+          setUploadMessage("");
+        }, 2000);
+      } catch (error: any) {
+        setUploadStatus("error");
+        setUploadMessage(`Error: ${error.message || "Upload failed"}`);
       }
-      const res = await issueRes.json();
-      setStatus(`Done → ${res.issueUrl}`);
     } catch (e: any) {
       console.error(e);
       setRecording(false);
-      setStatus(`Error: ${e.message || e}. Downloading locally…`);
-      if (lastBlobRef.current) {
+      setStatus(`Error: ${e.message || e}. ${allowDownloads ? "Downloading locally…" : "Recording failed."}`);
+      if (lastBlobRef.current && allowDownloads) {
         downloadBlob("recording.webm", lastBlobRef.current);
       }
     }
     setWorking(false);
+  }
+
+  async function uploadRecording(blob: Blob) {
+    // Decide upload strategy: small blobs inline; else S3 as before
+    let publicUrl: string | null = null;
+    let inlineVideo: { base64: string; contentType: string } | null = null;
+    if (!useStorage || blob.size <= 1024 * 1024) {
+      // inline to repo
+      const arrayBuf = await blob.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
+      inlineVideo = { base64, contentType: blob.type };
+    } else {
+      setStatus("Uploading to storage…");
+      const presignRes = await fetch("/api/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentType: blob.type }),
+      });
+      if (!presignRes.ok) {
+        throw new Error(`presign failed: ${presignRes.status}`);
+      }
+      const pres = await presignRes.json();
+      const putRes = await fetch(pres.uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": blob.type } });
+      if (!putRes.ok) {
+        throw new Error(`upload failed: ${putRes.status}`);
+      }
+      publicUrl = pres.publicUrl;
+    }
+    setStatus("Creating GitHub issue…");
+    const selectorLabel = "(region)";
+    const diag = collectRegionDiagnostics({
+      left: Math.floor(selectedTarget!.rect.left),
+      top: Math.floor(selectedTarget!.rect.top),
+      width: Math.floor(selectedTarget!.rect.width),
+      height: Math.floor(selectedTarget!.rect.height),
+    });
+    const logs = (window as any).__consoleCapture?.getLogs?.() || [];
+    (window as any).__consoleCapture?.stop?.();
+    const issueRes = await fetch("/api/create-issue", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: desc?.trim() ? desc.trim().slice(0, 120) : "User screen recording",
+        videoUrl: publicUrl,
+        pageUrl: location.href,
+        userAgent: navigator.userAgent,
+        targetRegion: diag.region,
+        capturedElements: diag.elements,
+        env: diag.env,
+        consoleLogs: logs,
+        notes: desc,
+        inlineVideo,
+      }),
+    });
+    if (!issueRes.ok) {
+      throw new Error(`issue failed: ${issueRes.status}`);
+    }
+    const res = await issueRes.json();
+    setStatus(`Done → ${res.issueUrl}`);
   }
 
   function downloadBlob(filename: string, blob: Blob) {
@@ -335,12 +372,26 @@ export default function CanvasRecorderDemo() {
         Cross-browser element recorder using html2canvas → canvas.captureStream() → MediaRecorder.
       </p>
       <div className="flex flex-wrap gap-3 mt-4 items-center">
-        {/* Main content no longer shows area/full-screen buttons; use floating widget */}
-
-        {/* Selection actions removed from main content; handled by overlay control */}
-
-        {/* Recording status moved beside Stop in floating widget */}
-
+        {/* Test API button */}
+        <button
+          onClick={async () => {
+            try {
+              setStatus("Testing API...");
+              const res = await fetch("/api/test-create-issue", { method: "POST" });
+              const data = await res.json();
+              if (data.success) {
+                setStatus(`API Test Success! Issue #${data.issueNumber} created`);
+              } else {
+                setStatus(`API Test Failed: ${data.error}`);
+              }
+            } catch (error: any) {
+              setStatus(`API Test Error: ${error.message}`);
+            }
+          }}
+          className="px-3 py-1 text-sm bg-green-600 text-white hover:bg-green-700"
+        >
+          Test API
+        </button>
       </div>
       {status && <div className="mt-2 text-neutral-700">{status}</div>}
 
@@ -416,8 +467,21 @@ export default function CanvasRecorderDemo() {
               placeholder="What happened? Steps to repro?"
             />
             <div className="mt-3 flex justify-end gap-2">
-              <button className="px-3 py-1 bg-neutral-200 text-neutral-800 border border-neutral-300" onClick={() => { setDesc(""); setDescModalOpen(false); }}>Cancel</button>
-              <button className="px-3 py-1 bg-neutral-800 text-white" onClick={() => setDescModalOpen(false)}>Create issue</button>
+              {uploadStatus === "idle" && (
+                <>
+                  <button className="px-3 py-1 bg-neutral-200 text-neutral-800 border border-neutral-300" onClick={() => { setDesc(""); setUserSubmitted(false); setDescModalOpen(false); }}>Cancel</button>
+                  <button className="px-3 py-1 bg-neutral-800 text-white" onClick={() => { setUserSubmitted(true); setDescModalOpen(false); }}>Create issue</button>
+                </>
+              )}
+              {uploadStatus === "uploading" && (
+                <div className="text-sm text-neutral-600">Uploading...</div>
+              )}
+              {uploadStatus === "success" && (
+                <div className="text-sm text-green-600">✓ {uploadMessage}</div>
+              )}
+              {uploadStatus === "error" && (
+                <div className="text-sm text-red-600">✗ {uploadMessage}</div>
+              )}
             </div>
           </div>
         </div>
