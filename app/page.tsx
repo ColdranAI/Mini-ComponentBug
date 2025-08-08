@@ -1,0 +1,290 @@
+"use client";
+
+import { useRef, useState, useEffect } from "react";
+import ErrorBoundary from "@/app/components/ErrorBoundary";
+import ErrorProneWidget from "@/app/components/ErrorProneWidget";
+import { pickArea } from "@/app/lib/pickers";
+import { createRegionController } from "@/app/lib/recorders";
+import { collectRegionDiagnostics } from "@/app/lib/inspect";
+import { startConsoleCapture } from "@/app/lib/telemetry";
+
+export default function CanvasRecorderDemo() {
+  const [status, setStatus] = useState("Idle…");
+  const [selectedSel, setSelectedSel] = useState<string | null>(null);
+  const [selectedTarget, setSelectedTarget] = useState<
+    | { kind: "region"; rect: DOMRect; label: string }
+    | null
+  >(null);
+  const [recording, setRecording] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const [working, setWorking] = useState(false);
+  const [notes, setNotes] = useState("");
+  const controllerRef = useRef<null | {
+    start: () => void;
+    stop: () => Promise<Blob>;
+  }>(null);
+  const lastBlobRef = useRef<Blob | null>(null);
+  const cursorRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const lastClickAtRef = useRef<number | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
+  const overlayCleanupRef = useRef<() => void>(() => {});
+
+  useEffect(() => {
+    let timer: any;
+    if (recording) {
+      const startedAt = Date.now();
+      timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 200);
+    } else {
+      setElapsed(0);
+    }
+    return () => clearInterval(timer);
+  }, [recording]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      cursorRef.current = { x: e.clientX, y: e.clientY };
+    };
+    const onClick = () => {
+      lastClickAtRef.current = Date.now();
+    };
+    window.addEventListener("mousemove", onMove, true);
+    window.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("mousemove", onMove, true);
+      window.removeEventListener("click", onClick, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    overlayCleanupRef.current?.();
+    overlayCleanupRef.current = () => {};
+    overlayRef.current?.remove();
+    overlayRef.current = null;
+
+    if (!selectedTarget) return;
+
+    const box = document.createElement("div");
+    overlayRef.current = box;
+    box.setAttribute("data-recorder-overlay", "1");
+    Object.assign(box.style, {
+      position: "fixed",
+      zIndex: "2147483646",
+      border: "2px solid #1d4ed8",
+      boxShadow: "0 0 0 2px rgba(29,78,216,0.15) inset",
+      background: "rgba(29,78,216,0.08)",
+      pointerEvents: "none",
+    } as CSSStyleDeclaration);
+    document.body.appendChild(box);
+
+    if (selectedTarget.kind === "region") {
+      const apply = () => {
+        const r = selectedTarget.rect;
+        Object.assign(box.style, {
+          left: `${r.left}px`,
+          top: `${r.top}px`,
+          width: `${r.width}px`,
+          height: `${r.height}px`,
+        });
+      };
+      apply();
+      // Keep fixed to viewport region; no listeners necessary
+      overlayCleanupRef.current = () => {
+        box.remove();
+      };
+    }
+
+    return () => {
+      overlayCleanupRef.current?.();
+      overlayCleanupRef.current = () => {};
+      overlayRef.current = null;
+    };
+  }, [selectedTarget]);
+
+  async function onStartRecording() {
+    if (!selectedTarget) return;
+    setStatus("Recording…");
+    setRecording(true);
+    // Start console capture
+    (window as any).__consoleCapture = startConsoleCapture();
+    if (selectedTarget.kind === "region") {
+      controllerRef.current = createRegionController(
+        selectedTarget.rect,
+        { fps: 8, maxSeconds: 30 },
+        cursorRef as any,
+        lastClickAtRef as any,
+        overlayRef.current
+      );
+    }
+    controllerRef.current?.start();
+  }
+
+  async function onStopAndUpload() {
+    try {
+      if (!controllerRef.current) return;
+      setStatus("Finalizing recording…");
+      setWorking(true);
+      const blob = await controllerRef.current.stop();
+      setRecording(false);
+      lastBlobRef.current = blob;
+      if (blob.size > 9.5 * 1024 * 1024) {
+        setStatus("Too large after trim. Downloading locally…");
+        downloadBlob("recording.webm", blob);
+        setWorking(false);
+        return;
+      }
+      setStatus("Uploading to S3…");
+      const presignRes = await fetch("/api/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contentType: blob.type }),
+      });
+      if (!presignRes.ok) {
+        throw new Error(`presign failed: ${presignRes.status}`);
+      }
+      const { uploadUrl, publicUrl } = await presignRes.json();
+      const putRes = await fetch(uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": blob.type } });
+      if (!putRes.ok) {
+        throw new Error(`upload failed: ${putRes.status}`);
+      }
+      setStatus("Creating GitHub issue…");
+      const selectorLabel = "(region)";
+      const diag = collectRegionDiagnostics({
+        left: Math.floor(selectedTarget!.rect.left),
+        top: Math.floor(selectedTarget!.rect.top),
+        width: Math.floor(selectedTarget!.rect.width),
+        height: Math.floor(selectedTarget!.rect.height),
+      });
+      const logs = (window as any).__consoleCapture?.getLogs?.() || [];
+      (window as any).__consoleCapture?.stop?.();
+      const issueRes = await fetch("/api/create-issue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "Component/Region recording (canvas)",
+          videoUrl: publicUrl,
+          pageUrl: location.href,
+          userAgent: navigator.userAgent,
+          targetRegion: diag.region,
+          capturedElements: diag.elements,
+          env: diag.env,
+          consoleLogs: logs,
+          notes,
+        }),
+      });
+      if (!issueRes.ok) {
+        throw new Error(`issue failed: ${issueRes.status}`);
+      }
+      const res = await issueRes.json();
+      setStatus(`Done → ${res.issueUrl}`);
+    } catch (e: any) {
+      console.error(e);
+      setRecording(false);
+      setStatus(`Error: ${e.message || e}. Downloading locally…`);
+      if (lastBlobRef.current) {
+        downloadBlob("recording.webm", lastBlobRef.current);
+      }
+    }
+    setWorking(false);
+  }
+
+  function downloadBlob(filename: string, blob: Blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  function resetSelection() {
+    setSelectedTarget(null);
+    setSelectedSel(null);
+    setStatus("Idle…");
+  }
+
+  return (
+    <main className="p-6 max-w-4xl mx-auto pt-20">
+      <h1 className="text-xl font-semibold">Component-only Recorder (Canvas)</h1>
+      <p className="text-sm text-neutral-700 mt-1">
+        Cross-browser element recorder using html2canvas → canvas.captureStream() → MediaRecorder.
+      </p>
+      <div className="flex flex-wrap gap-3 mt-4 items-center">
+        {!selectedTarget && (
+          <>
+            <button
+              onClick={async () => {
+                setStatus("Draw an area…");
+                const rect = await pickArea();
+                setSelectedTarget({ kind: "region", rect, label: "(region)" });
+                setSelectedSel("(region)");
+                setStatus("Ready. Click Start Recording when you’re set.");
+              }}
+              className="px-4 py-2  bg-neutral-800 text-white hover:bg-neutral-900"
+            >
+              Pick area
+            </button>
+            <button
+              onClick={() => {
+                const rect = new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+                setSelectedTarget({ kind: "region", rect, label: "(full screen)" });
+                setSelectedSel("(full screen)");
+                setStatus("Ready. Click Start Recording when you’re set.");
+              }}
+              className="px-4 py-2  bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Full screen
+            </button>
+          </>
+        )}
+
+        {selectedTarget && !recording && (
+          <>
+            <span className="text-sm text-neutral-700">Selected: {selectedSel}</span>
+            <button onClick={onStartRecording} className="px-4 py-2  bg-green-600 text-white hover:bg-green-700">
+              Start recording
+            </button>
+            <button disabled={working} onClick={resetSelection} className="px-3 py-2  border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50">
+              Reset
+            </button>
+          </>
+        )}
+
+        {recording && (
+          <>
+            <span className="text-sm text-red-700">● Recording… {elapsed}s</span>
+            <button disabled={working} onClick={onStopAndUpload} className="px-4 py-2  bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
+              {working ? "Uploading…" : "Stop & Upload → Issue"}
+            </button>
+          </>
+        )}
+
+      </div>
+      <div className="mt-2 text-neutral-700">{status}</div>
+
+      <div className="mt-4 grid gap-2 max-w-xl w-full">
+        <label className="text-sm text-neutral-700">Notes to include in the GitHub issue</label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Add repro steps, expected vs actual, etc."
+          className="w-full min-h-[96px]  border border-neutral-300 p-2 outline-none focus:ring-2 focus:ring-blue-500"
+        />
+      </div>
+
+      <section className="mt-6 grid gap-4">
+        <div className="border border-neutral-400 p-4 bg-white">
+          <h3 className="font-medium">Example component</h3>
+          <p className="text-sm text-neutral-600">Hover this or anything else—your choice.</p>
+          <button className="mt-2 px-3 py-1.5  bg-neutral-800 text-white">Click me</button>
+        </div>
+        <ErrorBoundary>
+          <ErrorProneWidget />
+        </ErrorBoundary>
+      </section>
+    </main>
+  );
+}
+
+// ErrorBoundary and ErrorProneWidget moved to app/components
+
+
