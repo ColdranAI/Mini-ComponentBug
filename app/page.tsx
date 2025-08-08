@@ -9,7 +9,7 @@ import { collectRegionDiagnostics } from "@/app/lib/inspect";
 import { startConsoleCapture } from "@/app/lib/telemetry";
 
 export default function CanvasRecorderDemo() {
-  const [status, setStatus] = useState("Idle…");
+  const [status, setStatus] = useState("");
   const [selectedSel, setSelectedSel] = useState<string | null>(null);
   const [selectedTarget, setSelectedTarget] = useState<
     | { kind: "region"; rect: DOMRect; label: string }
@@ -55,6 +55,18 @@ export default function CanvasRecorderDemo() {
     };
   }, []);
 
+  // ESC resets current selection when not recording
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && selectedTarget && !recording) {
+        e.preventDefault();
+        resetSelection();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [selectedTarget, recording]);
+
   useEffect(() => {
     overlayCleanupRef.current?.();
     overlayCleanupRef.current = () => {};
@@ -87,8 +99,80 @@ export default function CanvasRecorderDemo() {
         });
       };
       apply();
-      // Keep fixed to viewport region; no listeners necessary
+      // Add floating controls attached to bottom-right of region when not recording
+      let controls: HTMLDivElement | null = null;
+      const ensureControls = () => {
+        if (recording) return;
+        if (controls) return;
+        controls = document.createElement("div");
+        controls.setAttribute("data-recorder-overlay", "1");
+        Object.assign(controls.style, {
+          position: "fixed",
+          zIndex: "2147483647",
+          pointerEvents: "auto",
+          display: "flex",
+          gap: "6px",
+          alignItems: "center",
+        } as CSSStyleDeclaration);
+        const startBtn = document.createElement("button");
+        startBtn.textContent = "Start recording";
+        startBtn.onclick = () => onStartRecording();
+        Object.assign(startBtn.style, {
+          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
+          fontSize: "12px",
+          background: "#16a34a",
+          color: "#fff",
+          border: "none",
+          padding: "8px 10px",
+          cursor: "pointer",
+        } as CSSStyleDeclaration);
+        const closeBtn = document.createElement("button");
+        closeBtn.textContent = "×";
+        closeBtn.setAttribute("aria-label", "Cancel selection");
+        closeBtn.onclick = () => resetSelection();
+        Object.assign(closeBtn.style, {
+          fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial",
+          fontSize: "14px",
+          lineHeight: "1",
+          background: "#e5e7eb",
+          color: "#111827",
+          border: "1px solid #d1d5db",
+          padding: "6px 8px",
+          cursor: "pointer",
+        } as CSSStyleDeclaration);
+        controls.appendChild(startBtn);
+        controls.appendChild(closeBtn);
+        document.body.appendChild(controls);
+      };
+      const positionControls = () => {
+        if (!controls) return;
+        const r = selectedTarget.rect;
+        const crect = controls.getBoundingClientRect();
+        const left = Math.max(8, Math.floor(r.left + r.width - crect.width - 8));
+        const top = Math.max(8, Math.floor(r.top + r.height - crect.height - 8));
+        Object.assign(controls.style, { left: `${left}px`, top: `${top}px` } as CSSStyleDeclaration);
+      };
+      if (!recording) {
+        ensureControls();
+        // wait a tick to measure
+        setTimeout(() => {
+          positionControls();
+        }, 0);
+      }
+      const onScroll = () => {
+        apply();
+        positionControls();
+      };
+      const onResize = () => {
+        apply();
+        positionControls();
+      };
+      window.addEventListener("scroll", onScroll, true);
+      window.addEventListener("resize", onResize, true);
       overlayCleanupRef.current = () => {
+        window.removeEventListener("scroll", onScroll, true);
+        window.removeEventListener("resize", onResize, true);
+        controls?.remove();
         box.remove();
       };
     }
@@ -98,7 +182,7 @@ export default function CanvasRecorderDemo() {
       overlayCleanupRef.current = () => {};
       overlayRef.current = null;
     };
-  }, [selectedTarget]);
+  }, [selectedTarget, recording]);
 
   async function onStartRecording() {
     if (!selectedTarget) return;
@@ -199,7 +283,22 @@ export default function CanvasRecorderDemo() {
   function resetSelection() {
     setSelectedTarget(null);
     setSelectedSel(null);
-    setStatus("Idle…");
+    setStatus("");
+  }
+
+  async function pickAreaFlow() {
+    setStatus("Draw an area…");
+    const rect = await pickArea();
+    setSelectedTarget({ kind: "region", rect, label: "(region)" });
+    setSelectedSel("(region)");
+    setStatus("Ready. Click Start Recording when you’re set.");
+  }
+
+  function fullScreenFlow() {
+    const rect = new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+    setSelectedTarget({ kind: "region", rect, label: "(full screen)" });
+    setSelectedSel("(full screen)");
+    setStatus("Ready. Click Start Recording when you’re set.");
   }
 
   return (
@@ -209,57 +308,14 @@ export default function CanvasRecorderDemo() {
         Cross-browser element recorder using html2canvas → canvas.captureStream() → MediaRecorder.
       </p>
       <div className="flex flex-wrap gap-3 mt-4 items-center">
-        {!selectedTarget && (
-          <>
-            <button
-              onClick={async () => {
-                setStatus("Draw an area…");
-                const rect = await pickArea();
-                setSelectedTarget({ kind: "region", rect, label: "(region)" });
-                setSelectedSel("(region)");
-                setStatus("Ready. Click Start Recording when you’re set.");
-              }}
-              className="px-4 py-2  bg-neutral-800 text-white hover:bg-neutral-900"
-            >
-              Pick area
-            </button>
-            <button
-              onClick={() => {
-                const rect = new DOMRect(0, 0, window.innerWidth, window.innerHeight);
-                setSelectedTarget({ kind: "region", rect, label: "(full screen)" });
-                setSelectedSel("(full screen)");
-                setStatus("Ready. Click Start Recording when you’re set.");
-              }}
-              className="px-4 py-2  bg-blue-600 text-white hover:bg-blue-700"
-            >
-              Full screen
-            </button>
-          </>
-        )}
+        {/* Main content no longer shows area/full-screen buttons; use floating widget */}
 
-        {selectedTarget && !recording && (
-          <>
-            <span className="text-sm text-neutral-700">Selected: {selectedSel}</span>
-            <button onClick={onStartRecording} className="px-4 py-2  bg-green-600 text-white hover:bg-green-700">
-              Start recording
-            </button>
-            <button disabled={working} onClick={resetSelection} className="px-3 py-2  border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50">
-              Reset
-            </button>
-          </>
-        )}
+        {/* Selection actions removed from main content; handled by overlay control */}
 
-        {recording && (
-          <>
-            <span className="text-sm text-red-700">● Recording… {elapsed}s</span>
-            <button disabled={working} onClick={onStopAndUpload} className="px-4 py-2  bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
-              {working ? "Uploading…" : "Stop & Upload → Issue"}
-            </button>
-          </>
-        )}
+        {/* Recording status moved beside Stop in floating widget */}
 
       </div>
-      <div className="mt-2 text-neutral-700">{status}</div>
+      {status && <div className="mt-2 text-neutral-700">{status}</div>}
 
       <div className="mt-4 grid gap-2 max-w-xl w-full">
         <label className="text-sm text-neutral-700">Notes to include in the GitHub issue</label>
@@ -281,6 +337,40 @@ export default function CanvasRecorderDemo() {
           <ErrorProneWidget />
         </ErrorBoundary>
       </section>
+      {/* Floating mini widget (excluded from recording) */}
+      <div
+        data-recorder-overlay="1"
+        className="fixed bottom-4 right-4 z-[2147483646]"
+      >
+        <div className="bg-white/90 backdrop-blur-sm border border-neutral-300 shadow-sm p-2 flex gap-2 relative">
+          {recording && (
+            <div className="absolute -top-10 right-0 flex items-center gap-2">
+              <button
+                onClick={onStopAndUpload}
+                disabled={working}
+                className="px-3 py-1 text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {working ? "Uploading…" : "Stop"}
+              </button>
+              {!working && (
+                <span className="text-xs text-red-700 whitespace-nowrap">{elapsed}s</span>
+              )}
+            </div>
+          )}
+          <button
+            onClick={pickAreaFlow}
+            className="px-3 py-1 text-sm bg-neutral-800 text-white hover:bg-neutral-900"
+          >
+            Pick area
+          </button>
+          <button
+            onClick={fullScreenFlow}
+            className="px-3 py-1 text-sm bg-blue-600 text-white hover:bg-blue-700"
+          >
+            Full screen
+          </button>
+        </div>
+      </div>
     </main>
   );
 }

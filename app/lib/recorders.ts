@@ -571,6 +571,42 @@ export function createRegionController(
     subtitleEvents.push({ t, text });
   };
 
+  const getAccessibleName = (el: Element): string => {
+    try {
+      const he = el as HTMLElement;
+      const aria = he.getAttribute("aria-label");
+      if (aria) return aria.trim();
+      const labelled = he.getAttribute("aria-labelledby");
+      if (labelled) {
+        const ids = labelled.split(/\s+/g);
+        const parts: string[] = [];
+        for (const id of ids) {
+          const n = document.getElementById(id);
+          if (n) parts.push((n.textContent || "").trim());
+        }
+        const s = parts.filter(Boolean).join(" ").trim();
+        if (s) return s;
+      }
+      const text = (he.innerText || he.textContent || "").trim().replace(/\s+/g, " ");
+      if (text) return text;
+      if (he instanceof HTMLInputElement && he.value) return he.value;
+    } catch {}
+    return "";
+  };
+
+  const describeClickable = (el: Element): string => {
+    const he = el as HTMLElement;
+    const name = getAccessibleName(he);
+    const tag = he.tagName.toLowerCase();
+    let kind = tag;
+    if (he.getAttribute("role") === "button" || tag === "button") kind = "button";
+    else if (tag === "a") kind = "link";
+    else if (tag === "input") kind = "input";
+    const label = name || he.id || he.getAttribute("name") || he.getAttribute("title") || "element";
+    const short = label.length > 60 ? label.slice(0, 57) + "…" : label;
+    return `${kind}: "${short}"`;
+  };
+
   const setup = () => {
     display = document.createElement("canvas");
     ctx = display.getContext("2d");
@@ -608,28 +644,45 @@ export function createRegionController(
       ctx!.clearRect(0, 0, display!.width, display!.height);
       ctx!.drawImage(snap, 0, 0, display!.width, display!.height);
       drawSelectionOverlay(ctx!, sx, sy, display!.width, display!.height);
-      // Render simple subtitles queue (last 2 seconds)
+      // Render captions (last 2 seconds), left-to-right, max 80% width, near bottom with margin
       try {
         ctx!.save();
         const nowT = (startedAt() - t0) / 1000;
         const recent = subtitleEvents.filter((e) => nowT - e.t <= 2);
         if (recent.length) {
-          const pad = 8;
-          const lines = recent.map((e) => e.text);
-          ctx!.font = "12px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
-          ctx!.textBaseline = "bottom";
+          const joinText = recent.map((e) => e.text).join(" • ");
+          const padX = 10;
+          const padY = 8;
+          const maxBoxWidth = Math.floor(display!.width * 0.8);
+          const leftX = Math.floor(display!.width * 0.1);
+          ctx!.font = "13px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+          ctx!.textBaseline = "alphabetic";
+          ctx!.fillStyle = "#fff";
+          // wrap words
+          const words = joinText.split(/\s+/g);
+          const lines: string[] = [];
+          let current = "";
+          for (const w of words) {
+            const test = current ? current + " " + w : w;
+            const wWidth = ctx!.measureText(test).width;
+            if (wWidth + padX * 2 > maxBoxWidth && current) {
+              lines.push(current);
+              current = w;
+            } else {
+              current = test;
+            }
+          }
+          if (current) lines.push(current);
+          const lineHeight = 18;
+          const boxHeight = lines.length * lineHeight + padY * 2;
+          const boxY = display!.height - boxHeight - 18; // bottom margin
+          // background box
           ctx!.fillStyle = "rgba(0,0,0,0.6)";
-          ctx!.strokeStyle = "rgba(255,255,255,0.9)";
-          const maxWidth = Math.max(...lines.map((l) => ctx!.measureText(l).width)) + pad * 2;
-          const totalHeight = lines.length * 16 + pad * 2;
-          const x = Math.floor((display!.width - maxWidth) / 2);
-          const y = display!.height - 12;
-          // background
-          ctx!.fillRect(x, y - totalHeight, maxWidth, totalHeight);
+          ctx!.fillRect(leftX, boxY, maxBoxWidth, boxHeight);
           // text
-          ctx!.fillStyle = "white";
+          ctx!.fillStyle = "#fff";
           lines.forEach((l, i) => {
-            ctx!.fillText(l, x + pad, y - (lines.length - 1 - i) * 16 - 6);
+            ctx!.fillText(l, leftX + padX, boxY + padY + (i + 1) * lineHeight - 4);
           });
         }
         ctx!.restore();
@@ -647,7 +700,27 @@ export function createRegionController(
     drawOnce();
     setTimeout(drawOnce, 60);
     // Capture user interactions for subtitles
-    const onClick = () => pushSubtitle("Click");
+    const onClick = (e: MouseEvent) => {
+      try {
+        let el = e.target as Element | null;
+        if (!el) {
+          pushSubtitle("Click");
+          return;
+        }
+        // ignore clicks on overlays
+        if ((el as HTMLElement).closest('[data-recorder-overlay="1"]')) return;
+        // find nearest clickable ancestor
+        const clickableSelector = 'button, a, [role="button"], input, [onclick]';
+        const clickable = (el.matches && el.matches(clickableSelector)) ? el : el.closest?.(clickableSelector);
+        if (clickable) {
+          pushSubtitle(`Click: ${describeClickable(clickable)}`);
+        } else {
+          pushSubtitle("Click");
+        }
+      } catch {
+        pushSubtitle("Click");
+      }
+    };
     const onKeydown = (e: KeyboardEvent) => pushSubtitle(`Key ${e.key}`);
     const onSelect = () => pushSubtitle("Selecting text");
     window.addEventListener("click", onClick, true);
