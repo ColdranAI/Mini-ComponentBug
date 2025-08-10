@@ -222,42 +222,39 @@ function issueBodyTemplate(params: {
 export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
   if (!isAllowedOrigin(origin)) {
+    console.error("❌ Origin not allowed:", origin);
     return new NextResponse("forbidden", { status: 403 });
   }
 
-  const { title, videoUrl, pageUrl, userAgent, targetSelector, targetRegion, capturedElements, env, consoleLogs, networkRequests, notes, inlineVideo } =
-    await req.json();
-
-  let finalVideoUrl = videoUrl as string | undefined;
-  // Optional inline video path: commit small video to repo instead of external storage
-  if (!finalVideoUrl && inlineVideo && inlineVideo.base64 && inlineVideo.contentType) {
-    try {
-      const owner = process.env.GH_OWNER!;
-      const repo = process.env.GH_REPO!;
-      const now = new Date();
-      const ts = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}${String(now.getSeconds()).padStart(2, '0')}`;
-      const ext = inlineVideo.contentType.toLowerCase().includes('mp4') ? 'mp4' : 'webm';
-      const path = `issue-assets/recording-${ts}-${Math.random().toString(16).slice(2,8)}.${ext}`;
-      const message = `chore(issue-assets): add recording ${ts}`;
-      const resp = await octo.request('PUT /repos/{owner}/{repo}/contents/{path}', {
-        owner,
-        repo,
-        path,
-        message,
-        content: inlineVideo.base64,
-      });
-      // @ts-ignore
-      finalVideoUrl = resp.data.content?.download_url || resp.data.content?.html_url;
-    } catch (e: any) {
-      return NextResponse.json({ error: 'Failed to inline-upload video to repo', detail: String(e?.message || e) }, { status: 500 });
-    }
+  let requestBody;
+  try {
+    requestBody = await req.json();
+  } catch (e) {
+    console.error("❌ Invalid JSON in request body:", e);
+    return NextResponse.json({ error: "Invalid JSON in request body" }, { status: 400 });
   }
+
+  const { title, videoUrl, pageUrl, userAgent, targetSelector, targetRegion, capturedElements, env, consoleLogs, networkRequests, notes } = requestBody;
+
+  console.log("📥 Create issue request received:", {
+    title: title?.slice(0, 50) + "...",
+    hasVideoUrl: !!videoUrl,
+    pageUrl,
+    userAgent: userAgent?.slice(0, 50) + "...",
+    networkRequestsCount: networkRequests?.length || 0,
+    consoleLogsCount: consoleLogs?.length || 0,
+  });
+
+  const finalVideoUrl = videoUrl as string | undefined;
 
   if (!finalVideoUrl) {
-    return NextResponse.json({ error: "videoUrl or inlineVideo required" }, { status: 400 });
+    console.error("❌ No video URL found after processing:", {
+      hasVideoUrl: !!videoUrl,
+    });
+    return NextResponse.json({ error: "videoUrl required" }, { status: 400 });
   }
 
-  const body = issueBodyTemplate({
+  const issueBody = issueBodyTemplate({
     videoUrl: finalVideoUrl,
     pageUrl,
     userAgent,
@@ -270,17 +267,41 @@ export async function POST(req: NextRequest) {
     notes,
   });
 
-  const resp = await octo.request("POST /repos/{owner}/{repo}/issues", {
-    owner: process.env.GH_OWNER!,
-    repo: process.env.GH_REPO!,
-    title: title || "User screen recording",
-    body,
-  });
+  try {
+    console.log("📤 Creating GitHub issue:", {
+      owner: process.env.GH_OWNER,
+      repo: process.env.GH_REPO,
+      title: title || "User screen recording",
+      bodyLength: issueBody.length,
+    });
 
-  return NextResponse.json({
-    issueUrl: resp.data.html_url,
-    number: resp.data.number,
-  });
+    const resp = await octo.request("POST /repos/{owner}/{repo}/issues", {
+      owner: process.env.GH_OWNER!,
+      repo: process.env.GH_REPO!,
+      title: title || "User screen recording",
+      body: issueBody,
+    });
+
+    console.log("✅ GitHub issue created successfully:", {
+      number: resp.data.number,
+      url: resp.data.html_url,
+    });
+
+    return NextResponse.json({
+      issueUrl: resp.data.html_url,
+      number: resp.data.number,
+    });
+  } catch (error: any) {
+    console.error("❌ GitHub API error:", {
+      message: error.message,
+      status: error.status,
+      response: error.response?.data,
+    });
+    return NextResponse.json({ 
+      error: "Failed to create GitHub issue", 
+      detail: error.message 
+    }, { status: 500 });
+  }
 }
 
 

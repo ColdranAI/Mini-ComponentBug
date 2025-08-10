@@ -11,6 +11,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.744.0",
     "@aws-sdk/s3-request-presigner": "^3.744.0",
+    "@mux/mux-node": "^12.4.0",
     "@octokit/rest": "^22.0.0",
     "html2canvas": "^1.4.1",
     "next": "15.4.6",

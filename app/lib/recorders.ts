@@ -539,7 +539,7 @@ export function createElementController(
 
 export function createRegionController(
   region: DOMRect,
-  opts?: { fps?: number; maxSeconds?: number; maxBytes?: number },
+  opts?: { fps?: number; maxSeconds?: number; maxBytes?: number; enableMicrophone?: boolean },
   cursorRef?: { current: Pointer },
   lastClickAtRef?: { current: number | null },
   overlayEl?: HTMLElement | null
@@ -547,6 +547,7 @@ export function createRegionController(
   const fps = opts?.fps ?? 8;
   const maxSeconds = opts?.maxSeconds ?? 30;
   const maxBytes = opts?.maxBytes ?? Math.floor(9.5 * 1024 * 1024);
+  const enableMicrophone = opts?.enableMicrophone ?? false;
   const bitrate = Math.floor(((maxBytes * 8) / maxSeconds) * 0.9);
   const mimeCandidates = [
     "video/mp4;codecs=avc1",
@@ -611,7 +612,7 @@ export function createRegionController(
     return `${kind}: "${short}"`;
   };
 
-  const setup = () => {
+  const setup = async () => {
     display = document.createElement("canvas");
     ctx = display.getContext("2d");
     display.width = Math.max(2, Math.floor(region.width));
@@ -619,6 +620,22 @@ export function createRegionController(
     Object.assign(display.style, { position: "fixed", right: "8px", bottom: "8px", width: "160px", opacity: "0", pointerEvents: "none" } as CSSStyleDeclaration);
     document.body.appendChild(display);
     stream = display.captureStream(fps);
+    
+    // Add microphone audio if enabled
+    if (enableMicrophone) {
+      try {
+        const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const audioTrack = audioStream.getAudioTracks()[0];
+        if (audioTrack) {
+          stream.addTrack(audioTrack);
+          console.log("🎤 Microphone audio added to recording");
+        }
+      } catch (error) {
+        console.warn("🎤 Failed to access microphone:", error);
+        // Continue without audio
+      }
+    }
+    
     rec = new MediaRecorder(stream, { mimeType, bitsPerSecond: bitrate });
     chunks = [];
     bytes = 0;

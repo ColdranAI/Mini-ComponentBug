@@ -22,7 +22,10 @@ export default function HomePage() {
         placeholder="This textarea is for display purposes only. Use the recording functionality or Test API dialog for actual functionality."
       />
 
-      <div className="mt-4">
+      <div className="mt-4 flex flex-row gap-2">
+        <button onClick={() => window.open('https://x.com/ColdranAI', '_blank')} className="px-3 py-1.5 cursor-pointer bg-neutral-800 hover:bg-neutral-900 duration-300 active:scale-95 text-white">
+          Follow Coldran on X
+        </button>
         <button onClick={() => window.open('https://x.com/ArjunShips', '_blank')} className="px-3 py-1.5 cursor-pointer bg-neutral-800 hover:bg-neutral-900 duration-300 active:scale-95 text-white">
           Follow Arjun Aditya on X
         </button>
