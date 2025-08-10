@@ -179,12 +179,19 @@ async function snapshotCroppedArea(
   options: {
     backgroundColor: string;
     ignoreElements?: (node: Element) => boolean;
+    scale?: number;
+    useCORS?: boolean;
+    allowTaint?: boolean;
   }
 ) {
+  // Use high-DPI scaling for crisp capture
+  const pixelRatio = options.scale || window.devicePixelRatio || 1;
+  
   const baseOpts: any = {
     backgroundColor: options.backgroundColor,
-    scale: 1,
-    useCORS: true,
+    scale: pixelRatio, // Use device pixel ratio for crisp rendering
+    useCORS: options.useCORS ?? true,
+    allowTaint: options.allowTaint ?? false,
     ignoreElements: options.ignoreElements,
     x: sx,
     y: sy,
@@ -192,6 +199,11 @@ async function snapshotCroppedArea(
     height: sh,
     scrollX: 0,
     scrollY: 0,
+    // High quality options
+    logging: false,
+    removeContainer: true,
+    imageTimeout: 0,
+    foreignObjectRendering: true,
   };
 
   const tryRender = async (foreignObjectRendering: boolean) => {
@@ -544,16 +556,21 @@ export function createRegionController(
   lastClickAtRef?: { current: number | null },
   overlayEl?: HTMLElement | null
 ) {
-  const fps = opts?.fps ?? 8;
-  const maxSeconds = opts?.maxSeconds ?? 30;
-  const maxBytes = opts?.maxBytes ?? Math.floor(9.5 * 1024 * 1024);
+  const fps = opts?.fps ?? 30; // Ultra quality: 30 FPS for smooth motion
+  const maxSeconds = opts?.maxSeconds ?? 120; // Extended duration: 2 minutes
+  const maxBytes = opts?.maxBytes ?? Math.floor(100 * 1024 * 1024); // High capacity: 100MB
 
-  const bitrate = Math.floor(((maxBytes * 8) / maxSeconds) * 0.9);
+  // Calculate high bitrate for excellent quality (much higher than before)
+  const bitrate = Math.floor(((maxBytes * 8) / maxSeconds) * 0.95); // Use 95% of available space for max quality
+  
+  // Prioritize highest quality codecs first
   const mimeCandidates = [
-    "video/mp4;codecs=avc1",
-    "video/webm;codecs=vp9",
-    "video/webm;codecs=vp8",
-    "video/webm",
+    "video/webm;codecs=vp9,opus", // VP9 with audio - highest quality
+    "video/webm;codecs=vp9", // VP9 video only - excellent quality
+    "video/mp4;codecs=avc1.42E01E", // H.264 High Profile
+    "video/mp4;codecs=avc1", // H.264 baseline
+    "video/webm;codecs=vp8", // VP8 fallback
+    "video/webm", // Basic webm
   ];
   const mimeType = (window as any).MediaRecorder?.isTypeSupported
     ? mimeCandidates.find((t) => (window as any).MediaRecorder.isTypeSupported(t)) || "video/webm"
@@ -614,28 +631,64 @@ export function createRegionController(
 
   const setup = async () => {
     display = document.createElement("canvas");
-    ctx = display.getContext("2d");
+    ctx = display.getContext("2d", { 
+      alpha: false, 
+      desynchronized: true, // Better performance for frequent updates
+      willReadFrequently: false 
+    });
     
-    // Use exact region dimensions for canvas size
-    const canvasWidth = Math.max(2, Math.ceil(region.width));
-    const canvasHeight = Math.max(2, Math.ceil(region.height));
+    // Get exact region dimensions with high precision
+    const pixelRatio = window.devicePixelRatio || 1;
+    
+    // Use precise region dimensions without any rounding that could cause issues
+    const exactWidth = region.width;
+    const exactHeight = region.height;
+    
+    // Set canvas to exact region size multiplied by pixel ratio for crisp rendering
+    const canvasWidth = Math.round(exactWidth * pixelRatio);
+    const canvasHeight = Math.round(exactHeight * pixelRatio);
     
     display.width = canvasWidth;
     display.height = canvasHeight;
+    
+    // Set display size to exact region dimensions
+    display.style.width = Math.round(exactWidth) + 'px';
+    display.style.height = Math.round(exactHeight) + 'px';
+    
+    // Scale context for high-DPI rendering
+    ctx!.scale(pixelRatio, pixelRatio);
+    
+    // Position canvas off-screen but visible for debugging
     Object.assign(display.style, { 
       position: "fixed", 
       right: "8px", 
       bottom: "8px", 
-      width: "160px", 
-      opacity: "0", 
-      pointerEvents: "none" 
+      width: "200px", // Larger preview for better quality monitoring
+      height: "auto",
+      opacity: "0.1", // Slightly visible for debugging
+      pointerEvents: "none",
+      border: "1px solid red", // Visual indicator
+      zIndex: "999999"
     } as CSSStyleDeclaration);
     document.body.appendChild(display);
+    
+    // Create high-quality stream
     stream = display.captureStream(fps);
     
-
+    // Configure MediaRecorder for maximum quality
+    const recorderOptions: any = { 
+      mimeType, 
+      bitsPerSecond: bitrate,
+      videoBitsPerSecond: Math.floor(bitrate * 0.95), // Allocate most bandwidth to video
+      audioBitsPerSecond: Math.floor(bitrate * 0.05), // Small allocation for audio if supported
+    };
     
-    rec = new MediaRecorder(stream, { mimeType, bitsPerSecond: bitrate });
+    // Remove audio properties if codec doesn't support audio
+    if (!mimeType.includes('opus') && !mimeType.includes('audio')) {
+      delete recorderOptions.audioBitsPerSecond;
+    }
+    
+    rec = new MediaRecorder(stream, recorderOptions);
     chunks = [];
     bytes = 0;
     rec.ondataavailable = (e) => {
@@ -655,92 +708,116 @@ export function createRegionController(
       if (drawing) return;
       drawing = true;
       
-      // Use precise region coordinates - no dynamic adaptation
-      const sx = Math.floor(region.left + window.scrollX);
-      const sy = Math.floor(region.top + window.scrollY);
-      const sw = Math.max(1, Math.ceil(region.width));
-      const sh = Math.max(1, Math.ceil(region.height));
-      
-      // Ensure canvas matches exact region size
-      if (display!.width !== sw || display!.height !== sh) {
-        display!.width = sw;
-        display!.height = sh;
-      }
-      const pageBg = getPageBackgroundColor();
-      const { values, cleanup } = markFormElementsAndSnapshotValues();
-      const snap = await snapshotCroppedArea(sx, sy, sw, sh, {
-        backgroundColor: pageBg,
-        ignoreElements: (node: Element) => {
-          if (node instanceof HTMLIFrameElement) return true;
-          const el = node as Element;
-          if (overlayEl && (el === overlayEl || overlayEl.contains(el))) return true;
-          if (el && (el as Element).getAttribute && (el as Element).getAttribute!("data-recorder-overlay") === "1") return true;
-          return false;
-        },
-
-      });
-      
-      ctx!.clearRect(0, 0, display!.width, display!.height);
-      // Draw the snapshot at exact 1:1 scale - no scaling/cropping
-      ctx!.drawImage(snap, 0, 0);
-      // No selection overlay during recording - it's distracting
-      // drawSelectionOverlay(ctx!, sx, sy, display!.width, display!.height);
-      // Render captions (last 2 seconds), left-to-right, max 80% width, near bottom with margin
       try {
-        ctx!.save();
-        const nowT = (startedAt() - t0) / 1000;
-        const recent = subtitleEvents.filter((e) => nowT - e.t <= 2);
-        if (recent.length) {
-          const joinText = recent.map((e) => e.text).join(" • ");
-          const padX = 10;
-          const padY = 8;
-          const maxBoxWidth = Math.floor(display!.width * 0.8);
-          const leftX = Math.floor(display!.width * 0.1);
-          ctx!.font = "13px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
-          ctx!.textBaseline = "alphabetic";
-          ctx!.fillStyle = "#fff";
-          // wrap words
-          const words = joinText.split(/\s+/g);
-          const lines: string[] = [];
-          let current = "";
-          for (const w of words) {
-            const test = current ? current + " " + w : w;
-            const wWidth = ctx!.measureText(test).width;
-            if (wWidth + padX * 2 > maxBoxWidth && current) {
-              lines.push(current);
-              current = w;
-            } else {
-              current = test;
+        // Get EXACT region coordinates - no rounding or approximation
+        const exactLeft = region.left;
+        const exactTop = region.top;
+        const exactWidth = region.width;
+        const exactHeight = region.height;
+        
+        // Calculate precise source coordinates including scroll
+        const sourceX = exactLeft + window.scrollX;
+        const sourceY = exactTop + window.scrollY;
+        
+        const pageBg = getPageBackgroundColor();
+        const { values, cleanup } = markFormElementsAndSnapshotValues();
+        
+        try {
+          // Capture EXACTLY the selected area with high precision
+          const snap = await snapshotCroppedArea(sourceX, sourceY, exactWidth, exactHeight, {
+            backgroundColor: pageBg,
+            ignoreElements: (node: Element) => {
+              if (node instanceof HTMLIFrameElement) return true;
+              const el = node as Element;
+              if (overlayEl && (el === overlayEl || overlayEl.contains(el))) return true;
+              if (el && (el as Element).getAttribute && (el as Element).getAttribute!("data-recorder-overlay") === "1") return true;
+              return false;
+            },
+            // Add high-quality rendering options
+            scale: window.devicePixelRatio || 1,
+            useCORS: true,
+            allowTaint: false,
+          });
+          
+          // Clear the entire canvas
+          ctx!.clearRect(0, 0, exactWidth, exactHeight);
+          
+          // Draw the snapshot at EXACT size - no scaling or interpolation
+          ctx!.imageSmoothingEnabled = false; // Disable smoothing for pixel-perfect capture
+          ctx!.drawImage(snap, 0, 0, exactWidth, exactHeight);
+          ctx!.imageSmoothingEnabled = true; // Re-enable for other elements
+          
+          // Render captions with precise positioning
+          const nowT = (startedAt() - t0) / 1000;
+          const recent = subtitleEvents.filter((e) => nowT - e.t <= 2);
+          if (recent.length) {
+            ctx!.save();
+            const joinText = recent.map((e) => e.text).join(" • ");
+            const padX = 10;
+            const padY = 8;
+            const maxBoxWidth = Math.floor(exactWidth * 0.8);
+            const leftX = Math.floor(exactWidth * 0.1);
+            ctx!.font = "13px system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial";
+            ctx!.textBaseline = "alphabetic";
+            ctx!.fillStyle = "#fff";
+            
+            // Word wrapping
+            const words = joinText.split(/\s+/g);
+            const lines: string[] = [];
+            let current = "";
+            for (const w of words) {
+              const test = current ? current + " " + w : w;
+              const wWidth = ctx!.measureText(test).width;
+              if (wWidth + padX * 2 > maxBoxWidth && current) {
+                lines.push(current);
+                current = w;
+              } else {
+                current = test;
+              }
+            }
+            if (current) lines.push(current);
+            
+            const lineHeight = 18;
+            const boxHeight = lines.length * lineHeight + padY * 2;
+            const boxY = exactHeight - boxHeight - 18;
+            
+            // Background box
+            ctx!.fillStyle = "rgba(0,0,0,0.6)";
+            ctx!.fillRect(leftX, boxY, maxBoxWidth, boxHeight);
+            
+            // Text
+            ctx!.fillStyle = "#fff";
+            lines.forEach((l, i) => {
+              ctx!.fillText(l, leftX + padX, boxY + padY + (i + 1) * lineHeight - 4);
+            });
+            ctx!.restore();
+          }
+          
+          // Draw cursor with exact positioning
+          if (cursorRef && lastClickAtRef) {
+            const localX = cursorRef.current.x - exactLeft;
+            const localY = cursorRef.current.y - exactTop;
+            if (localX >= 0 && localY >= 0 && localX <= exactWidth && localY <= exactHeight) {
+              drawPointer(ctx!, localX, localY, lastClickAtRef.current);
             }
           }
-          if (current) lines.push(current);
-          const lineHeight = 18;
-          const boxHeight = lines.length * lineHeight + padY * 2;
-          const boxY = display!.height - boxHeight - 18; // bottom margin
-          // background box
-          ctx!.fillStyle = "rgba(0,0,0,0.6)";
-          ctx!.fillRect(leftX, boxY, maxBoxWidth, boxHeight);
-          // text
-          ctx!.fillStyle = "#fff";
-          lines.forEach((l, i) => {
-            ctx!.fillText(l, leftX + padX, boxY + padY + (i + 1) * lineHeight - 4);
-          });
+        } catch (renderError) {
+          console.error("Rendering error:", renderError);
+        } finally {
+          cleanup();
         }
-        ctx!.restore();
-      } catch {}
-      if (cursorRef && lastClickAtRef) {
-        const localX = cursorRef.current.x - region.left;
-        const localY = cursorRef.current.y - region.top;
-        if (localX >= 0 && localY >= 0 && localX <= display!.width && localY <= display!.height) {
-          drawPointer(ctx!, localX, localY, lastClickAtRef.current);
-        }
+      } catch (error) {
+        console.error("Drawing error:", error);
+      } finally {
+        drawing = false;
       }
-      cleanup();
-      drawing = false;
     };
-    // prime frames before starting
+    // Prime multiple frames for smooth start
     drawOnce();
-    setTimeout(drawOnce, 60);
+    setTimeout(drawOnce, 16); // ~60fps initial prime
+    setTimeout(drawOnce, 33); // ~30fps second prime
+    setTimeout(drawOnce, 50); // Third prime
+    
     // Capture user interactions for subtitles
     const onClick = (e: MouseEvent) => {
       try {
@@ -770,12 +847,17 @@ export function createRegionController(
     document.addEventListener("selectionchange", onSelect, true);
     // store for cleanup
     (display as any).__cleanupHandlers = { onClick, onKeydown, onSelect };
-    rec.start(500);
+    // Start recording with smaller chunks for better quality
+    rec.start(Math.min(250, 1000 / fps)); // Smaller time slices for smoother recording
+    
+    // Use more frequent drawing intervals for higher quality
     interval = setInterval(async () => {
       try {
         await drawOnce();
-      } catch {}
-    }, 1000 / fps);
+      } catch (error) {
+        console.warn("Drawing frame skipped:", error);
+      }
+    }, Math.floor(1000 / fps)); // Precise timing based on FPS
     endTimer = setTimeout(() => rec!.state === "recording" && rec!.stop(), maxSeconds * 1000);
   };
 

@@ -62,7 +62,7 @@ export interface RecorderActions {
   setUploadProgress: (progress: number) => void;
   onStartRecording: () => Promise<void>;
   onStopRecording: () => Promise<void>;
-  onUploadToMux: () => Promise<void>;
+  onUploadToZerops: () => Promise<void>;
   onCancelRecording: () => Promise<void>;
   resetSelection: () => void;
   pickAreaFlow: () => Promise<void>;
@@ -121,6 +121,20 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const overlayCleanupRef = useRef<() => void>(() => {});
 
+
+  useEffect(() => {
+    // On mount, ensure clean state and remove stray overlays
+    try {
+      document.querySelectorAll('[data-recorder-overlay="1"]').forEach((el) => {
+        try { (el as HTMLElement).remove(); } catch {}
+      });
+    } catch {}
+    setRecording(false);
+    setSelecting(false);
+    setSelectedTarget(null);
+    setSelectedSel(null);
+    setStatus("");
+  }, []);
 
   // Check for ongoing recording on mount
   useEffect(() => {
@@ -215,7 +229,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     if (selectedTarget.kind === "region") {
       controllerRef.current = createRegionController(
         selectedTarget.rect,
-        { fps: 8, maxSeconds: 30 },
+        { fps: 30, maxSeconds: 120, maxBytes: 100 * 1024 * 1024 }, // Ultra quality: 30 FPS, 2 minutes, 100MB
         cursorRef as any,
         lastClickAtRef as any,
         overlayRef.current
@@ -233,8 +247,8 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
       setRecording(false);
       lastBlobRef.current = blob;
       
-      if (blob.size > 9.5 * 1024 * 1024) {
-        setStatus("Recording too large (>9.5MB). Try recording a shorter session.");
+      if (blob.size > 100 * 1024 * 1024) {
+        setStatus("Recording too large (>100MB). Try recording a shorter session.");
         setWorking(false);
         return;
       }
@@ -261,20 +275,20 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     setWorking(false);
   };
 
-  const onUploadToMux = async () => {
+  const onUploadToZerops = async () => {
     if (!lastBlobRef.current) {
       setStatus("No recording available to upload");
       return;
     }
 
-    setStatus("Uploading video to Mux...");
+    setStatus("Uploading video to Zerops Object Storage...");
     setUploadProgress(10);
     
-    console.log("🎬 Starting Mux upload process...");
+    console.log("📦 Starting Zerops upload process...");
     
     try {
-      const videoUrl = await uploadVideoToMux(lastBlobRef.current);
-      console.log("✅ Mux upload completed successfully:", videoUrl);
+      const videoUrl = await uploadVideoToZerops(lastBlobRef.current);
+      console.log("✅ Zerops upload completed successfully:", videoUrl);
       setPreUploadedVideoUrl(videoUrl);
       setStatus("Video ready! Fill out the form to create GitHub issue.");
       setUploadProgress(0);
@@ -297,21 +311,10 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
       }
     }
 
-    // If there's an uploaded video, delete it from Mux
+    // If there's an uploaded video, we don't need to delete it from Zerops
+    // as it's stored in our own bucket and managed by us
     if (preUploadedVideoUrl) {
-      try {
-        const videoId = preUploadedVideoUrl.split('mux-')[1]?.split('-')[0];
-        if (videoId) {
-          await fetch(`/api/mux-delete`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ playbackId: videoId }),
-          });
-          console.log("🗑️ Deleted Mux video:", videoId);
-        }
-      } catch (error) {
-        console.error("❌ Failed to delete Mux video:", error);
-      }
+      console.log("🗑️ Video stored in Zerops Object Storage, no cleanup needed");
     }
 
     // Reset everything
@@ -327,101 +330,76 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     resetSelection();
   };
 
-  const uploadVideoToMux = async (blob: Blob): Promise<string> => {
+  const uploadVideoToZerops = async (blob: Blob): Promise<string> => {
     setUploadProgress(15);
     
-    console.log("📹 Uploading to Mux Video:", {
+    console.log("📦 Uploading to Zerops Object Storage:", {
       blobSize: blob.size,
       blobType: blob.type,
       origin: window.location.origin
     });
     
     try {
-      // Step 1: Create Mux direct upload URL
+      // Step 1: Get presigned upload URL from our API
       setUploadProgress(20);
-      const uploadRes = await fetch("/api/mux-upload", {
+      const filename = `recording-${Date.now()}.webm`;
+      const uploadRes = await fetch("/api/upload-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          filename, 
+          contentType: blob.type 
+        }),
       });
       
       if (!uploadRes.ok) {
         const errorText = await uploadRes.text();
-        console.error("❌ Mux upload creation failed:", {
+        console.error("❌ Zerops upload URL creation failed:", {
           status: uploadRes.status,
           statusText: uploadRes.statusText,
           errorText: errorText
         });
-        throw new Error(`Failed to create Mux upload: ${uploadRes.status} - ${errorText}`);
+        throw new Error(`Failed to create upload URL: ${uploadRes.status} - ${errorText}`);
       }
       
-      const { uploadId, uploadUrl } = await uploadRes.json();
-      console.log("📤 Got Mux upload URL:", { uploadId, uploadUrl });
+      const { url, key } = await uploadRes.json();
+      console.log("📤 Got Zerops upload URL:", { key, url: url.substring(0, 50) + "..." });
       
-      // Step 2: Upload video to Mux
+      // Step 2: Upload video directly to Zerops
       setUploadProgress(40);
-      const putRes = await fetch(uploadUrl, {
+      const putRes = await fetch(url, {
         method: "PUT",
         body: blob,
         headers: { "Content-Type": blob.type },
       });
       
       if (!putRes.ok) {
-        throw new Error(`Mux upload failed: ${putRes.status}`);
+        throw new Error(`Zerops upload failed: ${putRes.status}`);
       }
       
-      console.log("✅ Video uploaded to Mux, processing...");
+      console.log("✅ Video uploaded to Zerops successfully");
       
-      // Step 3: Poll for processing completion
-      setUploadProgress(60);
-      let attempts = 0;
-      const maxAttempts = 30; // 30 seconds max
+      // Step 3: Generate local video URL with key
+      setUploadProgress(90);
+      const timestamp = Date.now();
+      const videoId = `zerops-${btoa(key).replace(/[/+=]/g, '')}-${timestamp}`;
+      const localVideoUrl = `${window.location.origin}/video/${videoId}`;
       
-      while (attempts < maxAttempts) {
-        setUploadProgress(60 + (attempts / maxAttempts) * 30);
-        
-        const statusRes = await fetch(`/api/mux-status?uploadId=${uploadId}`);
-        if (!statusRes.ok) {
-          const errorText = await statusRes.text();
-          console.error("❌ Status check failed:", {
-            status: statusRes.status,
-            statusText: statusRes.statusText,
-            errorText: errorText
-          });
-          throw new Error(`Status check failed: ${statusRes.status} - ${errorText}`);
-        }
-        
-        const status = await statusRes.json();
-        console.log("📊 Mux processing status:", status);
-        
-        if (status.ready && status.playbackId) {
-          setUploadProgress(100);
-          
-          // Generate our local video URL
-          const timestamp = Date.now();
-          const videoId = `mux-${status.playbackId}-${timestamp}`;
-          const localVideoUrl = `${window.location.origin}/video/${videoId}`;
-          
-          console.log("✅ Video ready:", {
-            playbackId: status.playbackId,
-            videoId,
-            localUrl: localVideoUrl
-          });
-          
-          // Show the URL to the user immediately
-          setStatus(`Video ready! Preview: ${localVideoUrl}`);
-          
-          return localVideoUrl;
-        }
-        
-        // Wait 1 second before next attempt
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        attempts++;
-      }
+      console.log("✅ Video ready:", {
+        key,
+        videoId,
+        localUrl: localVideoUrl
+      });
       
-      throw new Error("Video processing timed out. Please try again.");
+      setUploadProgress(100);
+      
+      // Show the URL to the user immediately
+      setStatus(`Video ready! Preview: ${localVideoUrl}`);
+      
+      return localVideoUrl;
       
     } catch (error: any) {
-      console.error("❌ Mux upload failed:", error);
+      console.error("❌ Zerops upload failed:", error);
       throw error;
     }
   };
@@ -508,6 +486,13 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
   };
 
   const resetSelection = () => {
+    try {
+      // Remove any recorder overlays from DOM
+      document.querySelectorAll('[data-recorder-overlay="1"]').forEach((el) => {
+        try { (el as HTMLElement).remove(); } catch {}
+      });
+    } catch {}
+    setSelecting(false);
     setSelectedTarget(null);
     setSelectedSel(null);
     setStatus("");
@@ -579,7 +564,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     }
     
     if (!preUploadedVideoUrl) {
-      setValidationError("Video is still uploading to Mux. Please wait for upload to complete.");
+      setValidationError("Video is still uploading to Zerops. Please wait for upload to complete.");
       return;
     }
 
@@ -709,6 +694,24 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     }
   };
 
+  useEffect(() => {
+    const handleUnload = () => {
+      try {
+        if (controllerRef.current) {
+          controllerRef.current.stop().catch(() => {});
+        }
+      } catch {}
+      // Full reset
+      try {
+        document.querySelectorAll('[data-recorder-overlay="1"]').forEach((el) => {
+          try { (el as HTMLElement).remove(); } catch {}
+        });
+      } catch {}
+    };
+    window.addEventListener('unload', handleUnload);
+    return () => window.removeEventListener('unload', handleUnload);
+  }, []);
+
   const contextValue: RecorderContextType = {
     // State
     status,
@@ -763,7 +766,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     setUploadProgress,
     onStartRecording,
     onStopRecording,
-    onUploadToMux,
+    onUploadToZerops,
     onCancelRecording,
     resetSelection,
     pickAreaFlow,

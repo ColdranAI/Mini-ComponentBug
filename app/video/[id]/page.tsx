@@ -6,24 +6,86 @@ import { useEffect, useState } from "react";
 export default function VideoPage() {
   const params = useParams();
   const videoId = params.id as string;
-  const [playbackId, setPlaybackId] = useState<string | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [videoKey, setVideoKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (!videoId) return;
 
-    // Extract Mux playback ID from our video ID format
-    // Our format: mux-{playbackId}-{timestamp}
-    const match = videoId.match(/^mux-([a-zA-Z0-9]+)-\d+$/);
-    if (match) {
-      setPlaybackId(match[1]);
-      setLoading(false);
+    // Check if this is a Zerops video ID
+    // Our format: zerops-{base64encodedkey}-{timestamp}
+    const zeropMatch = videoId.match(/^zerops-([a-zA-Z0-9]+)-\d+$/);
+    if (zeropMatch) {
+      try {
+        // Decode the base64 key
+        const key = atob(zeropMatch[1].replace(/[^a-zA-Z0-9]/g, ''));
+        setVideoKey(key);
+        loadZeropsVideo(key);
+      } catch (e) {
+        setError("Invalid video ID format");
+        setLoading(false);
+      }
     } else {
-      setError("Invalid video ID format");
-      setLoading(false);
+      // Legacy Mux format - show error with migration notice
+      const muxMatch = videoId.match(/^mux-([a-zA-Z0-9]+)-\d+$/);
+      if (muxMatch) {
+        setError("This video uses the old Mux format and is no longer available. New recordings use Zerops Object Storage.");
+        setLoading(false);
+      } else {
+        setError("Invalid video ID format");
+        setLoading(false);
+      }
     }
   }, [videoId]);
+
+  const loadZeropsVideo = async (key: string) => {
+    try {
+      // Get signed URL for video playback
+      const response = await fetch('/api/file-url', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          key: key,
+          expiresIn: 3600, // 1 hour
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to load video');
+      }
+
+      const { url } = await response.json();
+      setVideoUrl(url);
+      setDownloadUrl(url);
+      setLoading(false);
+    } catch (err: any) {
+      console.error('Failed to load video:', err);
+      setError(err.message || 'Failed to load video');
+      setLoading(false);
+    }
+  };
+
+  const handleDownload = async () => {
+    if (!downloadUrl) return;
+    
+    try {
+      // Create a temporary link to trigger download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `bug-recording-${videoId}.webm`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (err) {
+      console.error('Download failed:', err);
+    }
+  };
 
   if (loading) {
     return (
@@ -36,12 +98,18 @@ export default function VideoPage() {
     );
   }
 
-  if (error || !playbackId) {
+  if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-red-600 mb-2">Video Not Found</h1>
-          <p className="text-neutral-600">{error || "Invalid video ID"}</p>
+          <p className="text-neutral-600 mb-4">{error}</p>
+          <a 
+            href="/" 
+            className="inline-block px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          >
+            ← Back to Bug Reporter
+          </a>
         </div>
       </div>
     );
@@ -53,22 +121,21 @@ export default function VideoPage() {
         <div className="bg-white rounded-lg shadow-lg overflow-hidden">
           {/* Video Player */}
           <div className="relative aspect-video bg-black">
-            <video
-              controls
-              autoPlay
-              className="w-full h-full"
-              poster={`https://image.mux.com/${playbackId}/thumbnail.jpg`}
-            >
-              <source 
-                src={`https://stream.mux.com/${playbackId}.m3u8`} 
-                type="application/x-mpegURL" 
-              />
-              <source 
-                src={`https://stream.mux.com/${playbackId}/high.mp4`} 
-                type="video/mp4" 
-              />
-              Your browser does not support the video tag.
-            </video>
+            {videoUrl ? (
+              <video
+                controls
+                autoPlay
+                className="w-full h-full"
+                src={videoUrl}
+                type="video/webm"
+              >
+                Your browser does not support the video tag.
+              </video>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <div className="text-white">Loading video...</div>
+              </div>
+            )}
           </div>
 
           {/* Video Info */}
@@ -81,31 +148,37 @@ export default function VideoPage() {
             </p>
             
             {/* Video Details */}
-            <div className="flex flex-wrap gap-4 text-xs text-neutral-500">
+            <div className="flex flex-wrap gap-4 text-xs text-neutral-500 mb-4">
               <span>Video ID: {videoId}</span>
-              <span>Playback ID: {playbackId}</span>
-              <span>Hosted by Mux</span>
+              {videoKey && <span>Storage Key: {videoKey}</span>}
+              <span>Hosted by Zerops Object Storage</span>
             </div>
 
             {/* Download Options */}
             <div className="mt-4 pt-4 border-t">
               <h3 className="text-sm font-medium text-neutral-700 mb-2">Download Options</h3>
               <div className="flex flex-wrap gap-2">
-                <a
-                  href={`https://stream.mux.com/${playbackId}/high.mp4`}
-                  download={`bug-recording-${videoId}.mp4`}
-                  className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                <button
+                  onClick={handleDownload}
+                  disabled={!downloadUrl}
+                  className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Download MP4 (High Quality)
-                </a>
-                <a
-                  href={`https://stream.mux.com/${playbackId}/medium.mp4`}
-                  download={`bug-recording-${videoId}-medium.mp4`}
-                  className="px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
-                >
-                  Download MP4 (Medium Quality)
-                </a>
+                  Download Video (.webm)
+                </button>
+                {downloadUrl && (
+                  <a
+                    href={downloadUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-1 bg-green-600 text-white text-xs rounded hover:bg-green-700"
+                  >
+                    Open in New Tab
+                  </a>
+                )}
               </div>
+              <p className="text-xs text-neutral-500 mt-2">
+                Download links expire after 1 hour for security purposes.
+              </p>
             </div>
           </div>
         </div>

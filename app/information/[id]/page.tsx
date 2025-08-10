@@ -2,7 +2,6 @@ import { notFound } from 'next/navigation';
 import { db } from "../../lib/db";
 import { bugReports, networkRequests, consoleLogs } from "../../lib/db/schema";
 import { eq, desc, count } from "drizzle-orm";
-import MuxPlayer from '@mux/mux-player-react';
 
 interface BugInfo {
   id: string;
@@ -125,7 +124,29 @@ export default async function BugInformationPage({ params }: { params: Promise<{
     return `${browser} on ${os}`;
   };
 
-  const playbackId = bugInfo.videoUrl ? bugInfo.videoUrl.split('mux-')[1]?.split('-')[0] : null;
+  // Extract video key from new Zerops format or handle legacy Mux format
+  const extractVideoInfo = (videoUrl: string) => {
+    // Check for new Zerops format: zerops-{base64encodedkey}-{timestamp}
+    const zeropMatch = videoUrl.match(/zerops-([a-zA-Z0-9]+)-\d+$/);
+    if (zeropMatch) {
+      try {
+        const key = atob(zeropMatch[1].replace(/[^a-zA-Z0-9]/g, ''));
+        return { type: 'zerops', key, videoId: videoUrl };
+      } catch (e) {
+        return { type: 'invalid', key: null, videoId: null };
+      }
+    }
+    
+    // Check for legacy Mux format: mux-{playbackId}-{timestamp}
+    const muxMatch = videoUrl.match(/mux-([a-zA-Z0-9]+)-\d+$/);
+    if (muxMatch) {
+      return { type: 'mux', key: muxMatch[1], videoId: videoUrl };
+    }
+    
+    return { type: 'invalid', key: null, videoId: null };
+  };
+
+  const videoInfo = bugInfo.videoUrl ? extractVideoInfo(bugInfo.videoUrl) : { type: 'none', key: null, videoId: null };
 
   return (
     <div className="min-h-screen bg-neutral-50 py-8">
@@ -176,29 +197,78 @@ export default async function BugInformationPage({ params }: { params: Promise<{
             {bugInfo.videoUrl && (
               <div className="bg-white rounded-lg shadow-sm border p-6">
                 <h2 className="text-xl font-semibold mb-4">🎬 Screen Recording</h2>
-                <div className="aspect-video bg-black rounded-md overflow-hidden mb-4">
-                  {playbackId ? (
-                    <MuxPlayer
-                      playbackId={playbackId}
-                      metadata={{
-                        video_id: bugInfo.videoUrl,
-                        video_title: bugInfo.title,
-                        viewer_user_id: 'bug-reporter-viewer',
-                      }}
-                      autoPlay={false}
-                      streamType="on-demand"
+                
+                {videoInfo.type === 'zerops' && (
+                  <div className="aspect-video bg-black rounded-md overflow-hidden mb-4">
+                    <video
+                      controls
                       className="w-full h-full"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-white">
-                      <p>Video not available</p>
+                      poster="/video-placeholder.svg"
+                    >
+                      <source src={`/api/file-url?key=${encodeURIComponent(videoInfo.key!)}&direct=true`} type="video/webm" />
+                      Your browser does not support the video tag.
+                    </video>
+                  </div>
+                )}
+
+                {videoInfo.type === 'mux' && (
+                  <div className="aspect-video bg-yellow-100 rounded-md overflow-hidden mb-4 flex items-center justify-center">
+                    <div className="text-center text-yellow-800 p-6">
+                      <div className="text-lg font-semibold mb-2">⚠️ Legacy Video Format</div>
+                      <p className="text-sm mb-4">
+                        This video uses the old Mux format and may no longer be available. 
+                        New recordings use Zerops Object Storage for better reliability.
+                      </p>
+                      <a href={bugInfo.videoUrl} target="_blank" rel="noopener noreferrer" 
+                         className="inline-block px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700">
+                        Try Opening Video Page
+                      </a>
                     </div>
+                  </div>
+                )}
+
+                {videoInfo.type === 'invalid' && (
+                  <div className="aspect-video bg-red-100 rounded-md overflow-hidden mb-4 flex items-center justify-center">
+                    <div className="text-center text-red-800 p-6">
+                      <div className="text-lg font-semibold mb-2">❌ Invalid Video Format</div>
+                      <p className="text-sm">
+                        The video URL format is not recognized. This may be a corrupted or invalid link.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {videoInfo.type === 'none' && (
+                  <div className="aspect-video bg-neutral-100 rounded-md overflow-hidden mb-4 flex items-center justify-center">
+                    <div className="text-center text-neutral-600 p-6">
+                      <div className="text-lg font-semibold mb-2">📹 No Video</div>
+                      <p className="text-sm">
+                        No screen recording was captured for this bug report.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-3">
+                  <a href={bugInfo.videoUrl} target="_blank" rel="noopener noreferrer" 
+                     className="text-blue-600 hover:underline text-sm">
+                    → Open video in dedicated page
+                  </a>
+                  {videoInfo.type === 'zerops' && videoInfo.key && (
+                    <button 
+                      onClick={() => {
+                        // Create download link
+                        const link = document.createElement('a');
+                        link.href = `/api/file-url?key=${encodeURIComponent(videoInfo.key!)}&direct=true&download=true`;
+                        link.download = `bug-recording-${bugInfo.id}.webm`;
+                        link.click();
+                      }}
+                      className="text-green-600 hover:underline text-sm"
+                    >
+                      ↓ Download video
+                    </button>
                   )}
                 </div>
-                <a href={bugInfo.videoUrl} target="_blank" rel="noopener noreferrer" 
-                   className="text-blue-600 hover:underline text-sm">
-                  → Open video in dedicated page
-                </a>
               </div>
             )}
 

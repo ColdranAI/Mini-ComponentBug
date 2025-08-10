@@ -19,7 +19,7 @@ export default function DescriptionModal() {
     validationError,
     createGitHubIssue,
     uploadProgress,
-    onUploadToMux,
+    onUploadToZerops,
     onCancelRecording,
   } = useRecorder();
 
@@ -57,7 +57,7 @@ export default function DescriptionModal() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={onUploadToMux}
+                onClick={onUploadToZerops}
                 className="px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 text-sm rounded"
               >
                 Upload & Continue
