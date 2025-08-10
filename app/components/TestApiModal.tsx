@@ -52,7 +52,7 @@ export default function TestApiModal() {
         
         <div className="mt-4 flex justify-end gap-2">
           <button 
-            className="px-3 py-1 bg-neutral-200 text-neutral-800 border border-neutral-300" 
+            className="px-3 py-1 bg-neutral-200 text-neutral-800 border border-neutral-300 cursor-pointer" 
             onClick={() => {
               setTestApiModalOpen(false);
               setTestApiText("");
@@ -62,7 +62,7 @@ export default function TestApiModal() {
             Cancel
           </button>
           <button 
-            className="px-3 py-1 bg-green-600 text-white hover:bg-green-700" 
+            className="px-3 py-1 bg-green-600 text-white hover:bg-green-700 cursor-pointer" 
             onClick={testApiWithDialog}
           >
             Test API

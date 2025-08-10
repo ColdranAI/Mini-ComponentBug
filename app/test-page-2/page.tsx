@@ -37,17 +37,6 @@ export default function TestPage2() {
         </div>
 
         <div className="border border-neutral-300 p-4 bg-white">
-          <h3 className="font-medium">Modal Trigger</h3>
-          <p className="text-sm text-neutral-600">Test modal and overlay interactions.</p>
-          <button 
-            className="mt-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white"
-            onClick={() => alert('This is a test modal!')}
-          >
-            Open Modal
-          </button>
-        </div>
-
-        <div className="border border-neutral-300 p-4 bg-white">
           <h3 className="font-medium">Drag and Drop Area</h3>
           <p className="text-sm text-neutral-600">Test drag and drop interactions.</p>
           <div 

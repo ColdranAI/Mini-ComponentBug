@@ -22,13 +22,19 @@ export default function HomePage() {
         placeholder="This textarea is for display purposes only. Use the recording functionality or Test API dialog for actual functionality."
       />
 
-      <section className="mt-6 grid gap-4">
+      <div className="mt-4">
+        <button onClick={() => window.open('https://x.com/ArjunShips', '_blank')} className="px-3 py-1.5 cursor-pointer bg-neutral-800 hover:bg-neutral-900 duration-300 active:scale-95 text-white">
+          Follow Arjun Aditya on X
+        </button>
+      </div>
+
+      <section className="mt-6 grid gap-4 pb-40">
         <DummyFailedRequests />
         
         <div className="border border-neutral-300 p-4 bg-white">
           <h3 className="font-medium">Example component</h3>
           <p className="text-sm text-neutral-600">Hover this or anything else—your choice.</p>
-          <button className="mt-2 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-900 duration-300 hover:scale-105 text-white">
+          <button className="mt-2 px-3 py-1.5 bg-neutral-800 hover:bg-neutral-900 duration-300 hover:scale-105 text-white cursor-pointer">
             Click me
           </button>
         </div>
@@ -53,8 +59,6 @@ export default function HomePage() {
         </div>
 
         <ErrorBoundary>
-          <ErrorProneWidget />
-          <ErrorProneWidget />
           <ErrorProneWidget />
         </ErrorBoundary>
       </section>

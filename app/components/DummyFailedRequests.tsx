@@ -92,7 +92,7 @@ export default function DummyFailedRequests() {
               body: JSON.stringify({ manual: true })
             }).catch(e => console.warn('Manual test 404:', e));
           }}
-          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm mr-2"
+          className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm mr-2 cursor-pointer"
         >
           Trigger 404 Error
         </button>
@@ -104,7 +104,7 @@ export default function DummyFailedRequests() {
               body: JSON.stringify({ data: 'invalid' })
             }).catch(e => console.warn('Manual test 500:', e));
           }}
-          className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm mr-2"
+          className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-sm mr-2 cursor-pointer"
         >
           Trigger 500 Error
         </button>
@@ -115,7 +115,7 @@ export default function DummyFailedRequests() {
               headers: { 'X-Test': 'true' }
             }).catch(e => console.warn('Manual test 403:', e));
           }}
-          className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-sm"
+          className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white text-sm cursor-pointer"
         >
           Trigger 403 Error
         </button>

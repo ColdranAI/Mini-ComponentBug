@@ -26,7 +26,7 @@ export default function FloatingWidget() {
             <button
               onClick={onStopAndUpload}
               disabled={working}
-              className="px-3 py-1 text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              className="px-3 py-1 text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 cursor-pointer"
             >
               {working ? "Uploading…" : "Stop"}
             </button>
@@ -38,21 +38,21 @@ export default function FloatingWidget() {
         <button
           onClick={pickAreaFlow}
           disabled={selecting || !!selectedTarget || recording}
-          className="px-3 py-1 text-sm bg-neutral-800 text-white hover:bg-neutral-900 disabled:opacity-50 disabled:pointer-events-none"
+          className="px-3 py-1 text-sm bg-neutral-800 text-white hover:bg-neutral-900 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
         >
           Pick area
         </button>
         <button
           onClick={fullScreenFlow}
           disabled={selecting || !!selectedTarget || recording}
-          className="px-3 py-1 text-sm bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none"
+          className="px-3 py-1 text-sm bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
         >
           Full screen
         </button>
         <button
           onClick={() => setTestApiModalOpen(true)}
           disabled={recording}
-          className="px-3 py-1 text-sm bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none"
+          className="px-3 py-1 text-sm bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:pointer-events-none cursor-pointer"
         >
           Test API
         </button>

@@ -32,7 +32,7 @@ export default function DescriptionModal() {
           {uploadStatus === "idle" && (
             <>
               <button 
-                className="px-3 py-1 bg-neutral-200 text-neutral-800 border border-neutral-300" 
+                className="px-3 py-1 bg-neutral-200 text-neutral-800 border border-neutral-300 cursor-pointer" 
                 onClick={() => { 
                   setDesc(""); 
                   setUserSubmitted(false); 
@@ -42,7 +42,7 @@ export default function DescriptionModal() {
                 Cancel
               </button>
               <button 
-                className="px-3 py-1 bg-neutral-800 text-white" 
+                className="px-3 py-1 bg-neutral-800 text-white cursor-pointer" 
                 onClick={() => { 
                   setUserSubmitted(true); 
                   setDescModalOpen(false); 

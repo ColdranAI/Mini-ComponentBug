@@ -16,7 +16,7 @@ export default function TestPage1() {
         <div className="border border-neutral-300 p-4 bg-white">
           <h3 className="font-medium">Test Component 1</h3>
           <p className="text-sm text-neutral-600">This component demonstrates different interactions.</p>
-          <button className="mt-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 duration-300 hover:scale-105 text-white">
+          <button className="mt-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 duration-300 hover:scale-105 text-white cursor-pointer">
             Click Test 1
           </button>
         </div>
@@ -35,7 +35,7 @@ export default function TestPage1() {
               <option>Option 2</option>
               <option>Option 3</option>
             </select>
-            <button className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white">
+            <button className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white cursor-pointer">
               Submit Form
             </button>
           </div>
@@ -45,13 +45,13 @@ export default function TestPage1() {
           <h3 className="font-medium">Interactive Elements</h3>
           <p className="text-sm text-neutral-600">Various interactive elements for testing.</p>
           <div className="mt-2 flex gap-2">
-            <button className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white">
+            <button className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white cursor-pointer">
               Red Button
             </button>
-            <button className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white">
+            <button className="px-3 py-1.5 bg-yellow-600 hover:bg-yellow-700 text-white cursor-pointer">
               Yellow Button
             </button>
-            <button className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white">
+            <button className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white cursor-pointer">
               Purple Button
             </button>
           </div>
