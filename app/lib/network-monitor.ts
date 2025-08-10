@@ -110,17 +110,8 @@ export function createNetworkMonitor(): NetworkMonitor {
             requestData.responseBody = 'Could not read response body';
           }
           
-          console.warn('🚨 Failed Network Request:', {
-            url: requestData.url,
-            method: requestData.method,
-            status: requestData.status,
-            statusText: requestData.statusText,
-            duration: requestData.duration,
-            requestHeaders: requestData.headers,
-            responseHeaders: requestData.responseHeaders,
-            requestBody: requestData.body,
-            responseBody: requestData.responseBody,
-          });
+          // Skip console logging for failed requests to avoid circular issues
+          // Data is still captured in logRequest() for analysis
         }
 
         logRequest(requestData);
@@ -130,14 +121,8 @@ export function createNetworkMonitor(): NetworkMonitor {
         requestData.duration = endTime - startTime;
         requestData.error = error.message || String(error);
         
-        console.error('🚨 Network Request Error:', {
-          url: requestData.url,
-          method: requestData.method,
-          error: requestData.error,
-          duration: requestData.duration,
-          requestHeaders: requestData.headers,
-          requestBody: requestData.body,
-        });
+        // Skip console logging for network errors to avoid circular issues
+        // Data is still captured in logRequest() for analysis
 
         logRequest(requestData);
         throw error;
@@ -213,17 +198,8 @@ export function createNetworkMonitor(): NetworkMonitor {
               requestData.responseBody = this.responseText;
             }
             
-            console.warn('🚨 Failed XMLHttpRequest:', {
-              url: requestData.url,
-              method: requestData.method,
-              status: requestData.status,
-              statusText: requestData.statusText,
-              duration: requestData.duration,
-              requestHeaders: requestData.headers,
-              responseHeaders: requestData.responseHeaders,
-              requestBody: requestData.body,
-              responseBody: requestData.responseBody,
-            });
+            // Skip console logging for failed XMLHttpRequest to avoid circular issues
+            // Data is still captured in logRequest() for analysis
           }
 
           logRequest(requestData);
@@ -244,14 +220,8 @@ export function createNetworkMonitor(): NetworkMonitor {
             error: 'XMLHttpRequest error',
           };
 
-          console.error('🚨 XMLHttpRequest Error:', {
-            url: requestData.url,
-            method: requestData.method,
-            error: requestData.error,
-            duration: requestData.duration,
-            requestHeaders: requestData.headers,
-            requestBody: requestData.body,
-          });
+          // Skip console logging for XMLHttpRequest errors to avoid circular issues
+          // Data is still captured in logRequest() for analysis
 
           logRequest(requestData);
         });

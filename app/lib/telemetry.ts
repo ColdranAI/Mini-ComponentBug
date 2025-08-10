@@ -20,18 +20,27 @@ function stringifyArg(arg: unknown): string {
       return `Event: ${arg.type} on ${(arg.target as any)?.tagName || 'unknown'}`;
     }
     if (typeof arg === 'object' && arg !== null) {
+      // Handle empty objects
+      if (Object.keys(arg).length === 0) {
+        return '{}';
+      }
+      
       // Better handling of DOM nodes and circular references
-      return JSON.stringify(arg, (key, value) => {
-        if (typeof value === 'object' && value !== null) {
-          if (value instanceof Node) {
-            return `[${value.constructor.name}${(value as any).id ? '#' + (value as any).id : ''}]`;
+      try {
+        return JSON.stringify(arg, (key, value) => {
+          if (typeof value === 'object' && value !== null) {
+            if (value instanceof Node) {
+              return `[${value.constructor.name}${(value as any).id ? '#' + (value as any).id : ''}]`;
+            }
+            if (value instanceof Event) {
+              return `[Event: ${value.type}]`;
+            }
           }
-          if (value instanceof Event) {
-            return `[Event: ${value.type}]`;
-          }
-        }
-        return value;
-      }, 2);
+          return value;
+        }, 2);
+      } catch (circularError) {
+        return '[Circular Reference]';
+      }
     }
     return JSON.stringify(arg);
   } catch {
@@ -113,12 +122,28 @@ export function startConsoleCapture(maxEntries = 2000): ConsoleCapture {
     return original.info.apply(console, args);
   };
   console.warn = (...args: any[]) => {
-    try { push("warn", args); } catch {}
+    try { 
+      // Avoid capturing our own network monitoring logs to prevent circular logging
+      const firstArg = args[0];
+      if (typeof firstArg === 'string' && firstArg.includes('🚨 Failed')) {
+        // Skip logging to avoid circular issues
+      } else {
+        push("warn", args); 
+      }
+    } catch {}
     // @ts-ignore
     return original.warn.apply(console, args);
   };
   console.error = (...args: any[]) => {
-    try { push("error", args); } catch {}
+    try { 
+      // Avoid capturing our own network monitoring logs to prevent circular logging
+      const firstArg = args[0];
+      if (typeof firstArg === 'string' && firstArg.includes('🚨 Network Request Error:')) {
+        // Skip logging to avoid circular issues
+      } else {
+        push("error", args); 
+      }
+    } catch {}
     // @ts-ignore
     return original.error.apply(console, args);
   };

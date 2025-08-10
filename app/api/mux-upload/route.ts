@@ -8,17 +8,27 @@ function isAllowedOrigin(origin: string | null): boolean {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
-  // If not configured, allow same-origin calls by default
+    
+  // If no origins configured, allow all requests (development mode)
   if (allow.length === 0) return true;
-  if (!origin) return false;
+  
+  // Allow requests without origin (same-origin requests)
+  if (!origin) return true;
+  
   return allow.includes(origin);
 }
 
 export async function POST(req: NextRequest) {
   const origin = req.headers.get("origin");
+  console.log("🔍 Mux upload - Origin:", origin);
+  
   if (!isAllowedOrigin(origin)) {
-    console.error("❌ Origin not allowed:", origin);
-    return new NextResponse("forbidden", { status: 403 });
+    console.error("❌ Origin not allowed for mux-upload:", origin);
+    return NextResponse.json({ 
+      error: "Origin not allowed", 
+      origin: origin,
+      allowedOrigins: process.env.ALLOWED_ORIGINS || "not configured"
+    }, { status: 403 });
   }
 
   // Check for required Mux credentials

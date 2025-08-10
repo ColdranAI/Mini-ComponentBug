@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRecorder } from "../contexts/RecorderContext";
-import RecorderOverlay from "./RecorderOverlay";
+import { RecorderOverlay } from "./RecorderOverlay";
 import FloatingWidget from "./FloatingWidget";
 import DescriptionModal from "./DescriptionModal";
 import TestApiModal from "./TestApiModal";

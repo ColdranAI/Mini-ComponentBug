@@ -15,9 +15,9 @@ export interface RecorderState {
   elapsed: number;
   working: boolean;
   selecting: boolean;
-  enableMicrophone: boolean;
   descModalOpen: boolean;
   desc: string;
+  title: string;
   userSubmitted: boolean;
   uploadStatus: "idle" | "uploading" | "success" | "error";
   uploadMessage: string;
@@ -37,6 +37,7 @@ export interface RecorderRefs {
   cursorRef: React.MutableRefObject<{ x: number; y: number }>;
   lastClickAtRef: React.MutableRefObject<number | null>;
   networkRequestsRef: React.MutableRefObject<NetworkRequest[]>;
+  consoleLogsRef: React.MutableRefObject<any[]>;
 }
 
 export interface RecorderActions {
@@ -47,9 +48,9 @@ export interface RecorderActions {
   setElapsed: (elapsed: number) => void;
   setWorking: (working: boolean) => void;
   setSelecting: (selecting: boolean) => void;
-  setEnableMicrophone: (enable: boolean) => void;
   setDescModalOpen: (open: boolean) => void;
   setDesc: (desc: string) => void;
+  setTitle: (title: string) => void;
   setUserSubmitted: (submitted: boolean) => void;
   setUploadStatus: (status: "idle" | "uploading" | "success" | "error") => void;
   setUploadMessage: (message: string) => void;
@@ -94,9 +95,10 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
   const [elapsed, setElapsed] = useState(0);
   const [working, setWorking] = useState(false);
   const [selecting, setSelecting] = useState(false);
-  const [enableMicrophone, setEnableMicrophone] = useState(false);
+
   const [descModalOpen, setDescModalOpen] = useState(false);
   const [desc, setDesc] = useState("");
+  const [title, setTitle] = useState("");
   const [userSubmitted, setUserSubmitted] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
@@ -109,6 +111,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
 
   // Refs
   const networkRequestsRef = useRef<NetworkRequest[]>([]);
+  const consoleLogsRef = useRef<any[]>([]);
   const controllerRef = useRef<null | { start: () => void; stop: () => Promise<Blob> }>(null);
   const lastBlobRef = useRef<Blob | null>(null);
   const cursorRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -116,7 +119,6 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const overlayCleanupRef = useRef<() => void>(() => {});
 
-  console.log("🔧 Using Mux Video for uploads");
 
   // Check for ongoing recording on mount
   useEffect(() => {
@@ -211,7 +213,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     if (selectedTarget.kind === "region") {
       controllerRef.current = createRegionController(
         selectedTarget.rect,
-        { fps: 8, maxSeconds: 30, enableMicrophone },
+        { fps: 8, maxSeconds: 30 },
         cursorRef as any,
         lastClickAtRef as any,
         overlayRef.current
@@ -235,31 +237,38 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
         return;
       }
       
-      // Auto-upload the video immediately
-      setStatus("Uploading video...");
-      setUploadProgress(0);
+      // Capture console logs and network requests before upload
       const logs = (window as any).__consoleCapture?.getLogs?.() || [];
+      consoleLogsRef.current = logs;
       (window as any).__consoleCapture?.stop?.();
       
       const allNetworkRequests = stopNetworkMonitoring();
       networkRequestsRef.current = allNetworkRequests;
       
-      try {
-        const videoUrl = await uploadVideoToMux(blob);
-        setPreUploadedVideoUrl(videoUrl);
-        setStatus("Video uploaded to Mux! Add description to create GitHub issue.");
-        setUploadProgress(0); // Reset for next upload
-        
-        // Open modal for description
-        setUserSubmitted(false);
-        setDescModalOpen(true);
-      } catch (error: any) {
-        console.error("❌ Video upload failed:", error);
-        setStatus(`Upload failed: ${error.message}`);
-        setPreUploadedVideoUrl(null);
-        setUploadProgress(0);
-        setDescModalOpen(true); // Still allow manual download
-      }
+      // Open modal immediately and start upload in background
+      setStatus("Opening dialog...");
+      setUserSubmitted(false);
+      setDescModalOpen(true);
+      
+      // Start Mux upload in background (don't await - let it upload while user fills form)
+      setStatus("Uploading video to Mux...");
+      setUploadProgress(10);
+      
+      console.log("🎬 Starting Mux upload process...");
+      
+      uploadVideoToMux(blob)
+        .then((videoUrl) => {
+          console.log("✅ Mux upload completed successfully:", videoUrl);
+          setPreUploadedVideoUrl(videoUrl);
+          setStatus("Video ready! Fill out the form to create GitHub issue.");
+          setUploadProgress(0);
+        })
+        .catch((error: any) => {
+          console.error("❌ Video upload failed:", error);
+          setStatus(`Upload failed: ${error.message}`);
+          setPreUploadedVideoUrl(null);
+          setUploadProgress(0);
+        });
     } catch (e: any) {
       console.error(e);
       setRecording(false);
@@ -269,11 +278,12 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
   };
 
   const uploadVideoToMux = async (blob: Blob): Promise<string> => {
-    setUploadProgress(10);
+    setUploadProgress(15);
     
     console.log("📹 Uploading to Mux Video:", {
       blobSize: blob.size,
-      blobType: blob.type
+      blobType: blob.type,
+      origin: window.location.origin
     });
     
     try {
@@ -285,7 +295,13 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
       });
       
       if (!uploadRes.ok) {
-        throw new Error(`Failed to create Mux upload: ${uploadRes.status}`);
+        const errorText = await uploadRes.text();
+        console.error("❌ Mux upload creation failed:", {
+          status: uploadRes.status,
+          statusText: uploadRes.statusText,
+          errorText: errorText
+        });
+        throw new Error(`Failed to create Mux upload: ${uploadRes.status} - ${errorText}`);
       }
       
       const { uploadId, uploadUrl } = await uploadRes.json();
@@ -315,7 +331,13 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
         
         const statusRes = await fetch(`/api/mux-status?uploadId=${uploadId}`);
         if (!statusRes.ok) {
-          throw new Error(`Status check failed: ${statusRes.status}`);
+          const errorText = await statusRes.text();
+          console.error("❌ Status check failed:", {
+            status: statusRes.status,
+            statusText: statusRes.statusText,
+            errorText: errorText
+          });
+          throw new Error(`Status check failed: ${statusRes.status} - ${errorText}`);
         }
         
         const status = await statusRes.json();
@@ -334,6 +356,9 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
             videoId,
             localUrl: localVideoUrl
           });
+          
+          // Show the URL to the user immediately
+          setStatus(`Video ready! Preview: ${localVideoUrl}`);
           
           return localVideoUrl;
         }
@@ -355,7 +380,8 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     let publicUrl: string | null = null;
     let inlineVideo: { base64: string; contentType: string } | null = null;
     
-    if (!useStorage || blob.size <= 1024 * 1024) {
+    // Remove old storage logic - now always use Mux
+    if (false) { // Keep structure but never use inline
       const arrayBuf = await blob.arrayBuffer();
       const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuf)));
       inlineVideo = { base64, contentType: blob.type };
@@ -482,6 +508,16 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     // Validation
     setValidationError("");
     
+    if (!title.trim()) {
+      setValidationError("Please provide a title for the issue.");
+      return;
+    }
+    
+    if (title.trim().length < 3) {
+      setValidationError("Title should be at least 3 characters long.");
+      return;
+    }
+    
     if (!desc.trim()) {
       setValidationError("Please provide a description of what happened.");
       return;
@@ -493,7 +529,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     }
     
     if (!preUploadedVideoUrl) {
-      setValidationError("No video URL found. Please wait for upload to complete or record again.");
+      setValidationError("Video is still uploading to Mux. Please wait for upload to complete.");
       return;
     }
 
@@ -509,31 +545,50 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
         height: Math.floor(selectedTarget!.rect.height),
       });
 
-      // Prepare request payload - use our local video URL
-      const requestPayload: any = {
-        title: desc.trim().slice(0, 120),
+      // First, store detailed bug information
+      const bugInfoPayload = {
+        title: title.trim(),
         pageUrl: location.href,
         userAgent: navigator.userAgent,
         targetRegion: diag.region,
         capturedElements: diag.elements,
         env: diag.env,
-        consoleLogs: (window as any).__consoleCapture?.getLogs?.() || [],
+        consoleLogs: consoleLogsRef.current || [],
         networkRequests: networkRequestsRef.current,
         notes: desc,
         videoUrl: preUploadedVideoUrl,
       };
-      
-      console.log("🔗 Creating GitHub issue with local video URL:", preUploadedVideoUrl);
 
-      console.log("📤 Sending create-issue request:", {
-        title: requestPayload.title,
-        hasVideoUrl: !!requestPayload.videoUrl,
-        videoUrl: requestPayload.videoUrl,
-        networkRequestsCount: requestPayload.networkRequests?.length || 0,
-        consoleLogsCount: requestPayload.consoleLogs?.length || 0,
+      console.log("📋 Storing detailed bug information to database...");
+      
+      const storeRes = await fetch("/api/store-bug-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bugInfoPayload),
       });
 
-      const issueRes = await fetch("/api/create-issue", {
+      if (!storeRes.ok) {
+        throw new Error(`Failed to store bug info: ${storeRes.status}`);
+      }
+
+      const { infoId, infoUrl, summary } = await storeRes.json();
+      
+      console.log("✅ Bug info stored:", { infoId, infoUrl, summary });
+
+      // Now create concise GitHub issue
+      const requestPayload = {
+        title: title.trim(),
+        videoUrl: preUploadedVideoUrl,
+        infoUrl: infoUrl,
+        summary: summary,
+        pageUrl: location.href,
+        userAgent: navigator.userAgent,
+        notes: desc,
+      };
+      
+      console.log("🔗 Creating concise GitHub issue with info URL:", infoUrl);
+
+      const issueRes = await fetch("/api/create-issue-concise", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestPayload),
@@ -613,9 +668,9 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     elapsed,
     working,
     selecting,
-    enableMicrophone,
     descModalOpen,
     desc,
+    title,
     userSubmitted,
     uploadStatus,
     uploadMessage,
@@ -634,6 +689,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     cursorRef,
     lastClickAtRef,
     networkRequestsRef,
+    consoleLogsRef,
     
     // Actions
     setStatus,
@@ -643,9 +699,9 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     setElapsed,
     setWorking,
     setSelecting,
-    setEnableMicrophone,
     setDescModalOpen,
     setDesc,
+    setTitle,
     setUserSubmitted,
     setUploadStatus,
     setUploadMessage,

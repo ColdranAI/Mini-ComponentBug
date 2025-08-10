@@ -1,0 +1,16 @@
+zerops:
+  - setup: app
+    build:
+      base: nodejs@20
+      buildCommands:
+        - pnpm i
+        - pnpm run build
+      deployFiles: ./
+    run:
+      base: nodejs@20
+      env:
+        ALLOWED_ORIGINS: "https://bug.coldran.com"
+      ports:
+        - port: 3000
+          httpSupport: true
+      start: pnpm start

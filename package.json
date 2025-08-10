@@ -1,30 +1,41 @@
 {
-  "name": "my-app",
+  "name": "mini-componentbug",
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --turbopack",
+    "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.744.0",
-    "@aws-sdk/s3-request-presigner": "^3.744.0",
+    "@aws-sdk/client-s3": "^3.864.0",
+    "@aws-sdk/s3-request-presigner": "^3.864.0",
     "@mux/mux-node": "^12.4.0",
+    "@mux/mux-player-react": "^3.5.3",
     "@octokit/rest": "^22.0.0",
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/pg": "^8.15.5",
+    "drizzle-orm": "^0.44.4",
     "html2canvas": "^1.4.1",
     "next": "15.4.6",
-    "octokit": "^4.0.2",
-    "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "octokit": "^4.1.4",
+    "pg": "^8.16.3",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "@types/node": "^22.17.1",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "drizzle-kit": "^0.31.4",
+    "eslint": "^9.33.0",
+    "eslint-config-next": "15.1.2",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.2"
   }
 }
