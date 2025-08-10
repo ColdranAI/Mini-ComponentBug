@@ -187,18 +187,29 @@ async function snapshotCroppedArea(
   // Use high-DPI scaling for crisp capture
   const pixelRatio = options.scale || window.devicePixelRatio || 1;
   
+  // Debug: Log what we're capturing
+  console.log("📸 html2canvas capture:", {
+    sourceCoords: { x: sx, y: sy, width: sw, height: sh },
+    currentScroll: { x: window.scrollX, y: window.scrollY },
+    pixelRatio
+  });
+  
   const baseOpts: any = {
     backgroundColor: options.backgroundColor,
     scale: pixelRatio, // Use device pixel ratio for crisp rendering
     useCORS: options.useCORS ?? true,
     allowTaint: options.allowTaint ?? false,
     ignoreElements: options.ignoreElements,
+    // Crop parameters - these are document-relative coordinates
     x: sx,
-    y: sy,
+    y: sy, 
     width: sw,
     height: sh,
-    scrollX: 0,
-    scrollY: 0,
+    // Capture the full document but crop to our region
+    windowWidth: window.innerWidth,
+    windowHeight: window.innerHeight,
+    scrollX: window.scrollX,
+    scrollY: window.scrollY,
     // High quality options
     logging: false,
     removeContainer: true,
@@ -563,8 +574,20 @@ export function createRegionController(
   // Calculate high bitrate for excellent quality (much higher than before)
   const bitrate = Math.floor(((maxBytes * 8) / maxSeconds) * 0.95); // Use 95% of available space for max quality
   
-  // Prioritize highest quality codecs first
-  const mimeCandidates = [
+  // Prioritize codecs with Safari/WebKit compatibility first
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  const isWebKit = /webkit/i.test(navigator.userAgent) && !/chrome/i.test(navigator.userAgent);
+  
+  const mimeCandidates = isSafari || isWebKit ? [
+    // Safari-friendly codecs first
+    "video/mp4;codecs=avc1.42E01E", // H.264 High Profile (Safari preferred)
+    "video/mp4;codecs=avc1.42001E", // H.264 Main Profile 
+    "video/mp4;codecs=avc1", // H.264 baseline
+    "video/mp4", // Basic MP4
+    "video/webm;codecs=vp8", // VP8 fallback
+    "video/webm", // Basic webm
+  ] : [
+    // Chrome/Firefox - prioritize VP9 for quality
     "video/webm;codecs=vp9,opus", // VP9 with audio - highest quality
     "video/webm;codecs=vp9", // VP9 video only - excellent quality
     "video/mp4;codecs=avc1.42E01E", // H.264 High Profile
@@ -572,9 +595,12 @@ export function createRegionController(
     "video/webm;codecs=vp8", // VP8 fallback
     "video/webm", // Basic webm
   ];
+  
   const mimeType = (window as any).MediaRecorder?.isTypeSupported
-    ? mimeCandidates.find((t) => (window as any).MediaRecorder.isTypeSupported(t)) || "video/webm"
-    : "video/webm";
+    ? mimeCandidates.find((t) => (window as any).MediaRecorder.isTypeSupported(t)) || "video/mp4"
+    : "video/mp4";
+  
+  console.log("🎥 Selected codec for recording:", { mimeType, isSafari, isWebKit });
 
   let display: HTMLCanvasElement | null = null;
   let ctx: CanvasRenderingContext2D | null = null;
@@ -667,27 +693,54 @@ export function createRegionController(
       height: "auto",
       opacity: "0.1", // Slightly visible for debugging
       pointerEvents: "none",
-      border: "1px solid red", // Visual indicator
+      border: "2px solid #3b82f6", // Blue visual indicator
       zIndex: "999999"
     } as CSSStyleDeclaration);
     document.body.appendChild(display);
     
-    // Create high-quality stream
-    stream = display.captureStream(fps);
-    
-    // Configure MediaRecorder for maximum quality
-    const recorderOptions: any = { 
-      mimeType, 
-      bitsPerSecond: bitrate,
-      videoBitsPerSecond: Math.floor(bitrate * 0.95), // Allocate most bandwidth to video
-      audioBitsPerSecond: Math.floor(bitrate * 0.05), // Small allocation for audio if supported
-    };
-    
-    // Remove audio properties if codec doesn't support audio
-    if (!mimeType.includes('opus') && !mimeType.includes('audio')) {
-      delete recorderOptions.audioBitsPerSecond;
+    // Create high-quality stream with Safari compatibility
+    try {
+      if (isSafari || isWebKit) {
+        // Safari sometimes has issues with specific FPS, try without parameter first
+        stream = (display as any).captureStream?.() || (display as any).captureStream?.(fps);
+        if (!stream) {
+          throw new Error("captureStream not supported");
+        }
+      } else {
+        stream = display.captureStream(fps);
+      }
+      console.log("📹 Canvas stream created:", { fps, tracks: stream.getTracks().length });
+    } catch (error) {
+      console.error("❌ Failed to create canvas stream:", error);
+      throw new Error("Canvas recording not supported in this browser");
     }
     
+    // Check MediaRecorder support
+    if (!(window as any).MediaRecorder) {
+      throw new Error("MediaRecorder not supported in this browser");
+    }
+    
+    // Configure MediaRecorder for maximum quality with Safari compatibility
+    const recorderOptions: any = { 
+      mimeType
+    };
+    
+    // Only add bitrate settings if supported (Safari sometimes has issues with these)
+    try {
+      if (!(isSafari || isWebKit)) {
+        recorderOptions.bitsPerSecond = bitrate;
+        recorderOptions.videoBitsPerSecond = Math.floor(bitrate * 0.95);
+        
+        // Remove audio properties if codec doesn't support audio
+        if (mimeType.includes('opus') || mimeType.includes('audio')) {
+          recorderOptions.audioBitsPerSecond = Math.floor(bitrate * 0.05);
+        }
+      }
+    } catch (error) {
+      console.warn("⚠️ Bitrate settings not supported, using default quality");
+    }
+    
+    console.log("🎙️ MediaRecorder options:", recorderOptions);
     rec = new MediaRecorder(stream, recorderOptions);
     chunks = [];
     bytes = 0;
@@ -715,7 +768,16 @@ export function createRegionController(
         const exactWidth = region.width;
         const exactHeight = region.height;
         
-        // Calculate precise source coordinates including scroll
+        // Debug: Log coordinates for troubleshooting
+        console.log("🎯 Recording coordinates:", {
+          region: { left: exactLeft, top: exactTop, width: exactWidth, height: exactHeight },
+          scroll: { x: window.scrollX, y: window.scrollY },
+          viewport: { width: window.innerWidth, height: window.innerHeight },
+          documentSize: { width: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight }
+        });
+        
+        // Convert viewport coordinates to document coordinates for html2canvas
+        // html2canvas captures the entire document, so we need document-relative coordinates
         const sourceX = exactLeft + window.scrollX;
         const sourceY = exactTop + window.scrollY;
         

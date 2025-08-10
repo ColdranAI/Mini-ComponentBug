@@ -123,9 +123,9 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
 
 
   useEffect(() => {
-    // On mount, ensure clean state and remove stray overlays
+    // On mount, ensure clean state and remove stray overlays (but preserve the floating widget)
     try {
-      document.querySelectorAll('[data-recorder-overlay="1"]').forEach((el) => {
+      document.querySelectorAll('[data-recorder-overlay="1"]:not([data-recorder-widget])').forEach((el) => {
         try { (el as HTMLElement).remove(); } catch {}
       });
     } catch {}
@@ -165,7 +165,18 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     let timer: any;
     if (recording) {
       const savedState = localStorage.getItem('bug-reporter-recording');
-      const startedAt = savedState ? JSON.parse(savedState).startTime : Date.now();
+      let startedAt: number;
+      
+      if (savedState) {
+        try {
+          const state = JSON.parse(savedState);
+          startedAt = state.startTime || Date.now();
+        } catch {
+          startedAt = Date.now();
+        }
+      } else {
+        startedAt = Date.now();
+      }
       
       const recordingState = {
         isRecording: true,
@@ -180,12 +191,22 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
       };
       localStorage.setItem('bug-reporter-recording', JSON.stringify(recordingState));
       
-      timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 200);
+      // Set initial elapsed time
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+      
+      // Update timer more frequently for smoother counting
+      timer = setInterval(() => {
+        const newElapsed = Math.floor((Date.now() - startedAt) / 1000);
+        setElapsed(newElapsed);
+        console.log("⏱️ Recording time:", newElapsed + "s");
+      }, 100); // Update every 100ms for smooth counting
     } else {
       setElapsed(0);
       localStorage.removeItem('bug-reporter-recording');
     }
-    return () => clearInterval(timer);
+    return () => {
+      if (timer) clearInterval(timer);
+    };
   }, [recording, selectedTarget]);
 
   // Mouse and keyboard event handlers
@@ -219,23 +240,40 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
   // Actions
   const onStartRecording = async () => {
     if (!selectedTarget) return;
-    setStatus("Recording…");
-    setRecording(true);
-    setUserSubmitted(false);
     
-    (window as any).__consoleCapture = startConsoleCapture();
-    startNetworkMonitoring();
-    
-    if (selectedTarget.kind === "region") {
-      controllerRef.current = createRegionController(
-        selectedTarget.rect,
-        { fps: 30, maxSeconds: 120, maxBytes: 100 * 1024 * 1024 }, // Ultra quality: 30 FPS, 2 minutes, 100MB
-        cursorRef as any,
-        lastClickAtRef as any,
-        overlayRef.current
-      );
+    try {
+      setStatus("Recording…");
+      setRecording(true);
+      setUserSubmitted(false);
+      
+      console.log("🎬 Starting recording...", { 
+        browser: navigator.userAgent, 
+        target: selectedTarget 
+      });
+      
+      (window as any).__consoleCapture = startConsoleCapture();
+      startNetworkMonitoring();
+      
+      if (selectedTarget.kind === "region") {
+        controllerRef.current = createRegionController(
+          selectedTarget.rect,
+          { fps: 30, maxSeconds: 120, maxBytes: 100 * 1024 * 1024 }, // Ultra quality: 30 FPS, 2 minutes, 100MB
+          cursorRef as any,
+          lastClickAtRef as any,
+          overlayRef.current
+        );
+      }
+      
+      await controllerRef.current?.start();
+      console.log("✅ Recording started successfully");
+    } catch (error: any) {
+      console.error("❌ Failed to start recording:", error);
+      setRecording(false);
+      setStatus(`Recording failed: ${error.message || "Browser not supported"}`);
+      
+      // Reset selection so user can try again
+      resetSelection();
     }
-    await controllerRef.current?.start();
   };
 
   const onStopRecording = async () => {
@@ -487,8 +525,8 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
 
   const resetSelection = () => {
     try {
-      // Remove any recorder overlays from DOM
-      document.querySelectorAll('[data-recorder-overlay="1"]').forEach((el) => {
+      // Remove any recorder overlays from DOM (but preserve the floating widget)
+      document.querySelectorAll('[data-recorder-overlay="1"]:not([data-recorder-widget])').forEach((el) => {
         try { (el as HTMLElement).remove(); } catch {}
       });
     } catch {}
@@ -701,9 +739,9 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
           controllerRef.current.stop().catch(() => {});
         }
       } catch {}
-      // Full reset
+      // Full reset (but preserve the floating widget)
       try {
-        document.querySelectorAll('[data-recorder-overlay="1"]').forEach((el) => {
+        document.querySelectorAll('[data-recorder-overlay="1"]:not([data-recorder-widget])').forEach((el) => {
           try { (el as HTMLElement).remove(); } catch {}
         });
       } catch {}

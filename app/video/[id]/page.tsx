@@ -116,7 +116,7 @@ export default function VideoPage() {
   }
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center p-4">
+    <div className="min-h-screen  flex items-center justify-center p-4">
       <div className="w-full max-w-4xl">
         <div className="bg-white rounded-lg shadow-lg overflow-hidden">
           {/* Video Player */}
@@ -126,9 +126,8 @@ export default function VideoPage() {
                 controls
                 autoPlay
                 className="w-full h-full"
-                src={videoUrl}
-                type="video/webm"
               >
+                <source src={videoUrl} type="video/webm" />
                 Your browser does not support the video tag.
               </video>
             ) : (
