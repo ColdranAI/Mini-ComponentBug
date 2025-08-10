@@ -7,30 +7,43 @@ const octo = new Octokit({
 
 export async function POST(req: NextRequest) {
   try {
+    // Parse the request body to get test data
+    const testData = await req.json().catch(() => ({}));
+    
     // Test the GitHub API connection
     const testIssue = {
-      title: "Test Issue - API Connection",
+      title: testData.text ? `Test Issue - ${testData.text.slice(0, 50)}` : "Test Issue - API Connection",
       body: `## Test Issue
       
 This is a test issue to verify the API connection is working.
 
 **Environment:**
-- Time: ${new Date().toISOString()}
-- User Agent: Test
-- Page URL: Test
+- Time: ${new Date().toLocaleString('en-US', { 
+    weekday: 'long', 
+    year: 'numeric', 
+    month: 'long', 
+    day: 'numeric', 
+    hour: '2-digit', 
+    minute: '2-digit', 
+    second: '2-digit',
+    timeZoneName: 'short'
+  })}
+- Browser: Test Environment
+- Page URL: Test Page
 
-**Test Data:**
-- Target Region: Test region
-- Captured Elements: Test elements
-- Console Logs: Test logs
+**Test Data from Dialog:**
+- Description: ${testData.text || "No description provided"}
+- Has Video: ${testData.hasVideo ? "Yes" : "No"}
+${testData.hasVideo ? `- Video Name: ${testData.videoName}
+- Video Size: ${Math.round(testData.videoSize / 1024)}KB` : ""}
 
-**Note:** This is just a test - no video is uploaded. Real recordings will include:
+**Note:** This is just a test - video files are not actually uploaded in test mode. Real recordings will include:
 - Video file (inline or S3 URL)
 - Actual browser environment data
 - Real console logs
 - Actual captured elements
 
-This issue was created via API test.`,
+This issue was created via API test dialog.`,
     };
 
     const resp = await octo.request("POST /repos/{owner}/{repo}/issues", {

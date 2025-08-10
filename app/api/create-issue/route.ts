@@ -34,13 +34,40 @@ function issueBodyTemplate(params: {
   }>;
   env?: Record<string, any>;
   consoleLogs?: Array<{ level: string; message: string; timestamp: string }>;
+  networkRequests?: Array<{
+    id: string;
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body?: any;
+    timestamp: number;
+    status?: number;
+    statusText?: string;
+    responseHeaders?: Record<string, string>;
+    responseBody?: any;
+    error?: string;
+    duration?: number;
+  }>;
   notes?: string;
 }) {
-  const { videoUrl, pageUrl, userAgent, targetSelector, targetRegion, capturedElements, env, consoleLogs, notes } = params;
+  const { videoUrl, pageUrl, userAgent, targetSelector, targetRegion, capturedElements, env, consoleLogs, networkRequests, notes } = params;
 
-  const recordingSection = videoUrl.endsWith(".mp4")
-    ? videoUrl
-    : `[Download/Play recording](${videoUrl})`;
+  // Enhanced video link formatting
+  const recordingSection = (() => {
+    const isDirectVideo = videoUrl.endsWith(".mp4") || videoUrl.endsWith(".webm");
+    const isGitHubAsset = videoUrl.includes("github.com") || videoUrl.includes("githubusercontent.com");
+    
+    if (isDirectVideo && isGitHubAsset) {
+      // For GitHub-hosted videos, create both download link and direct embed
+      return `🎥 **[Download/Play Recording](${videoUrl})**\n\n<video width="100%" controls>\n  <source src="${videoUrl}" type="video/${videoUrl.split('.').pop()}">\n  Your browser does not support the video tag.\n  [Download video](${videoUrl})\n</video>`;
+    } else if (isDirectVideo) {
+      // For other direct video links
+      return `🎥 **[Download/Play Recording](${videoUrl})**`;
+    } else {
+      // For other storage URLs
+      return `🎥 **[Download/Play Recording](${videoUrl})**`;
+    }
+  })();
 
   const lines: string[] = [];
   lines.push("## Screen Recording", recordingSection, "");
@@ -48,7 +75,38 @@ function issueBodyTemplate(params: {
   lines.push(`- **Page:** ${pageUrl ?? "N/A"}`);
   if (targetSelector) lines.push(`- **Element:** \`${targetSelector}\``);
   if (targetRegion) lines.push(`- **Region:** left=${targetRegion.left}, top=${targetRegion.top}, width=${targetRegion.width}, height=${targetRegion.height}`);
-  lines.push(`- **User-Agent:** ${userAgent ?? "N/A"}`);
+  // Parse user agent for better display
+  const parseUserAgent = (ua: string) => {
+    const isWindows = ua.includes('Windows');
+    const isMac = ua.includes('Mac OS X') || ua.includes('Macintosh');
+    const isLinux = ua.includes('Linux') && !ua.includes('Android');
+    const isAndroid = ua.includes('Android');
+    const isiOS = ua.includes('iPhone') || ua.includes('iPad');
+    
+    const isChrome = ua.includes('Chrome') && !ua.includes('Edg');
+    const isFirefox = ua.includes('Firefox');
+    const isSafari = ua.includes('Safari') && !ua.includes('Chrome');
+    const isEdge = ua.includes('Edg');
+    
+    let os = 'Unknown OS';
+    if (isWindows) os = 'Windows';
+    else if (isMac) os = 'macOS';
+    else if (isiOS) os = 'iOS';
+    else if (isAndroid) os = 'Android';
+    else if (isLinux) os = 'Linux';
+    
+    let browser = 'Unknown Browser';
+    if (isChrome) browser = 'Chrome';
+    else if (isFirefox) browser = 'Firefox';
+    else if (isSafari) browser = 'Safari';
+    else if (isEdge) browser = 'Edge';
+    
+    return `${browser} on ${os}`;
+  };
+
+  const humanReadableUA = userAgent ? parseUserAgent(userAgent) : "N/A";
+  lines.push(`- **Browser:** ${humanReadableUA}`);
+  lines.push(`- **Raw User-Agent:** ${userAgent ?? "N/A"}`);
 
   if (env) {
     lines.push("", "## Environment");
@@ -60,7 +118,21 @@ function issueBodyTemplate(params: {
       if (platform) lines.push(`- **Platform:** ${platform}`);
       if (timezone) lines.push(`- **Timezone:** ${timezone}`);
       if (referrer) lines.push(`- **Referrer:** ${referrer}`);
-      if (timestamp) lines.push(`- **Timestamp:** ${timestamp}`);
+      // Format timestamp in human-readable format
+      if (timestamp) {
+        const humanTime = new Date(timestamp).toLocaleString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit', 
+          second: '2-digit',
+          timeZoneName: 'short'
+        });
+        lines.push(`- **Recording Time:** ${humanTime}`);
+        lines.push(`- **Raw Timestamp:** ${timestamp}`);
+      }
     } catch {}
   }
 
@@ -85,6 +157,64 @@ function issueBodyTemplate(params: {
     }
   }
 
+  if (networkRequests && networkRequests.length) {
+    const failedRequests = networkRequests.filter(req => 
+      (req.status && req.status >= 400) || req.error
+    );
+    
+    if (failedRequests.length > 0) {
+      lines.push("", "## Failed Network Requests");
+      for (const req of failedRequests.slice(-20)) { // Last 20 failed requests
+        const timestamp = new Date(req.timestamp).toLocaleTimeString();
+        lines.push(`### ${req.method} ${req.url}`);
+        lines.push(`- **Time:** ${timestamp}`);
+        lines.push(`- **Status:** ${req.status || 'Network Error'} ${req.statusText || ''}`);
+        if (req.duration) lines.push(`- **Duration:** ${req.duration}ms`);
+        if (req.error) lines.push(`- **Error:** ${req.error}`);
+        
+        if (req.headers && Object.keys(req.headers).length > 0) {
+          lines.push("- **Request Headers:**");
+          Object.entries(req.headers).forEach(([key, value]) => {
+            lines.push(`  - ${key}: ${value}`);
+          });
+        }
+        
+        if (req.body) {
+          lines.push("- **Request Body:**");
+          const bodyStr = typeof req.body === 'string' ? req.body : JSON.stringify(req.body, null, 2);
+          lines.push(`\`\`\`\n${bodyStr.slice(0, 1000)}${bodyStr.length > 1000 ? '...' : ''}\n\`\`\``);
+        }
+        
+        if (req.responseBody) {
+          lines.push("- **Response Body:**");
+          const respStr = typeof req.responseBody === 'string' ? req.responseBody : JSON.stringify(req.responseBody, null, 2);
+          lines.push(`\`\`\`\n${respStr.slice(0, 1000)}${respStr.length > 1000 ? '...' : ''}\n\`\`\``);
+        }
+        
+        lines.push("");
+      }
+    }
+    
+    // Summary of all requests
+    lines.push("", "## Network Request Summary");
+    const successCount = networkRequests.filter(req => req.status && req.status >= 200 && req.status < 400).length;
+    const errorCount = failedRequests.length;
+    const totalCount = networkRequests.length;
+    
+    lines.push(`- **Total Requests:** ${totalCount}`);
+    lines.push(`- **Successful:** ${successCount}`);
+    lines.push(`- **Failed:** ${errorCount}`);
+    
+    if (totalCount > 0) {
+      const avgDuration = networkRequests
+        .filter(req => req.duration)
+        .reduce((acc, req) => acc + (req.duration || 0), 0) / networkRequests.filter(req => req.duration).length;
+      if (avgDuration) {
+        lines.push(`- **Average Duration:** ${Math.round(avgDuration)}ms`);
+      }
+    }
+  }
+
   lines.push("", "## Notes", notes?.trim() || "- (add repro steps here)");
   return lines.join("\n");
 }
@@ -95,7 +225,7 @@ export async function POST(req: NextRequest) {
     return new NextResponse("forbidden", { status: 403 });
   }
 
-  const { title, videoUrl, pageUrl, userAgent, targetSelector, targetRegion, capturedElements, env, consoleLogs, notes, inlineVideo } =
+  const { title, videoUrl, pageUrl, userAgent, targetSelector, targetRegion, capturedElements, env, consoleLogs, networkRequests, notes, inlineVideo } =
     await req.json();
 
   let finalVideoUrl = videoUrl as string | undefined;
@@ -136,6 +266,7 @@ export async function POST(req: NextRequest) {
     capturedElements,
     env,
     consoleLogs,
+    networkRequests,
     notes,
   });
 
