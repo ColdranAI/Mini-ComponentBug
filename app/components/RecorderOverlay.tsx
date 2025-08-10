@@ -74,12 +74,21 @@ export class RecorderOverlay {
       
       // Stop button
       const stopButton = document.createElement("button");
-      stopButton.textContent = "Stop & Upload";
-      stopButton.className = "block w-full px-3 py-2 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700";
+      stopButton.textContent = "Stop Recording";
+      stopButton.className = "block w-full px-3 py-2 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700 mb-2";
       stopButton.onclick = () => {
-        this.recorder.onStopAndUpload();
+        this.recorder.onStopRecording();
       };
       controlsContainer.appendChild(stopButton);
+
+      // Cancel button
+      const cancelButton = document.createElement("button");
+      cancelButton.textContent = "Cancel (ESC)";
+      cancelButton.className = "block w-full px-3 py-2 bg-neutral-600 text-white rounded text-xs font-medium hover:bg-neutral-700";
+      cancelButton.onclick = () => {
+        this.recorder.onCancelRecording();
+      };
+      controlsContainer.appendChild(cancelButton);
     }
 
     this.controlsElement = controlsContainer;

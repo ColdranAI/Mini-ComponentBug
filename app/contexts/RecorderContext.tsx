@@ -61,7 +61,9 @@ export interface RecorderActions {
   setValidationError: (error: string) => void;
   setUploadProgress: (progress: number) => void;
   onStartRecording: () => Promise<void>;
-  onStopAndUpload: () => Promise<void>;
+  onStopRecording: () => Promise<void>;
+  onUploadToMux: () => Promise<void>;
+  onCancelRecording: () => Promise<void>;
   resetSelection: () => void;
   pickAreaFlow: () => Promise<void>;
   fullScreenFlow: () => void;
@@ -222,7 +224,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     await controllerRef.current?.start();
   };
 
-  const onStopAndUpload = async () => {
+  const onStopRecording = async () => {
     try {
       if (!controllerRef.current) return;
       setStatus("Finalizing recording…");
@@ -245,36 +247,84 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
       const allNetworkRequests = stopNetworkMonitoring();
       networkRequestsRef.current = allNetworkRequests;
       
-      // Open modal immediately and start upload in background
-      setStatus("Opening dialog...");
+      // Open modal immediately (but don't upload yet)
+      setStatus("Recording completed! Choose your action.");
       setUserSubmitted(false);
       setDescModalOpen(true);
-      
-      // Start Mux upload in background (don't await - let it upload while user fills form)
-      setStatus("Uploading video to Mux...");
-      setUploadProgress(10);
-      
-      console.log("🎬 Starting Mux upload process...");
-      
-      uploadVideoToMux(blob)
-        .then((videoUrl) => {
-          console.log("✅ Mux upload completed successfully:", videoUrl);
-          setPreUploadedVideoUrl(videoUrl);
-          setStatus("Video ready! Fill out the form to create GitHub issue.");
-          setUploadProgress(0);
-        })
-        .catch((error: any) => {
-          console.error("❌ Video upload failed:", error);
-          setStatus(`Upload failed: ${error.message}`);
-          setPreUploadedVideoUrl(null);
-          setUploadProgress(0);
-        });
+      setUploadProgress(0);
+      setPreUploadedVideoUrl(null);
     } catch (e: any) {
       console.error(e);
       setRecording(false);
       setStatus(`Recording failed: ${e.message || e}`);
     }
     setWorking(false);
+  };
+
+  const onUploadToMux = async () => {
+    if (!lastBlobRef.current) {
+      setStatus("No recording available to upload");
+      return;
+    }
+
+    setStatus("Uploading video to Mux...");
+    setUploadProgress(10);
+    
+    console.log("🎬 Starting Mux upload process...");
+    
+    try {
+      const videoUrl = await uploadVideoToMux(lastBlobRef.current);
+      console.log("✅ Mux upload completed successfully:", videoUrl);
+      setPreUploadedVideoUrl(videoUrl);
+      setStatus("Video ready! Fill out the form to create GitHub issue.");
+      setUploadProgress(0);
+    } catch (error: any) {
+      console.error("❌ Video upload failed:", error);
+      setStatus(`Upload failed: ${error.message}`);
+      setPreUploadedVideoUrl(null);
+      setUploadProgress(0);
+    }
+  };
+
+  const onCancelRecording = async () => {
+    // If currently recording, stop it first
+    if (recording && controllerRef.current) {
+      try {
+        await controllerRef.current.stop();
+        setRecording(false);
+      } catch (error) {
+        console.error("Error stopping recording:", error);
+      }
+    }
+
+    // If there's an uploaded video, delete it from Mux
+    if (preUploadedVideoUrl) {
+      try {
+        const videoId = preUploadedVideoUrl.split('mux-')[1]?.split('-')[0];
+        if (videoId) {
+          await fetch(`/api/mux-delete`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ playbackId: videoId }),
+          });
+          console.log("🗑️ Deleted Mux video:", videoId);
+        }
+      } catch (error) {
+        console.error("❌ Failed to delete Mux video:", error);
+      }
+    }
+
+    // Reset everything
+    setDescModalOpen(false);
+    setPreUploadedVideoUrl(null);
+    setUploadProgress(0);
+    setDesc("");
+    setTitle("");
+    setValidationError("");
+    setElapsed(0);
+    lastBlobRef.current = null;
+    setStatus("Recording cancelled");
+    resetSelection();
   };
 
   const uploadVideoToMux = async (blob: Blob): Promise<string> => {
@@ -712,7 +762,9 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     setValidationError,
     setUploadProgress,
     onStartRecording,
-    onStopAndUpload,
+    onStopRecording,
+    onUploadToMux,
+    onCancelRecording,
     resetSelection,
     pickAreaFlow,
     fullScreenFlow,

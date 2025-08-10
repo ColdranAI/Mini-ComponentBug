@@ -18,8 +18,7 @@ export default function HomePage() {
       {status && <div className="mt-2 text-neutral-700">{status}</div>}
 
       <textarea 
-        className="w-full min-h-[128px] border border-neutral-300 p-2 outline-none focus:ring-2 focus:ring-neutral-500 bg-neutral-50 mt-4" 
-        placeholder="This textarea is for display purposes only. Use the recording functionality or Test API dialog for actual functionality."
+        className="w-full min-h-[128px] border border-neutral-300 p-2 outline-none focus:ring-2 focus:ring-neutral-500 bg-neutral-50 mt-4"
       />
 
       <div className="mt-4 flex flex-row gap-2">

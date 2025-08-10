@@ -486,7 +486,7 @@ export function createElementController(
       if (cursorRef && lastClickAtRef) {
         const localX = cursorRef.current.x - rect.left;
         const localY = cursorRef.current.y - rect.top;
-        if (localX >= 0 && localY >= 0 && localX <= display!.width && localY <= display!.height) {
+        if (localX >= 0 && localY >= 0 && localX <= rect.width && localY <= rect.height) {
           drawPointer(ctx!, localX, localY, lastClickAtRef.current);
         }
       }
@@ -615,9 +615,21 @@ export function createRegionController(
   const setup = async () => {
     display = document.createElement("canvas");
     ctx = display.getContext("2d");
-    display.width = Math.max(2, Math.floor(region.width));
-    display.height = Math.max(2, Math.floor(region.height));
-    Object.assign(display.style, { position: "fixed", right: "8px", bottom: "8px", width: "160px", opacity: "0", pointerEvents: "none" } as CSSStyleDeclaration);
+    
+    // Use exact region dimensions for canvas size
+    const canvasWidth = Math.max(2, Math.ceil(region.width));
+    const canvasHeight = Math.max(2, Math.ceil(region.height));
+    
+    display.width = canvasWidth;
+    display.height = canvasHeight;
+    Object.assign(display.style, { 
+      position: "fixed", 
+      right: "8px", 
+      bottom: "8px", 
+      width: "160px", 
+      opacity: "0", 
+      pointerEvents: "none" 
+    } as CSSStyleDeclaration);
     document.body.appendChild(display);
     stream = display.captureStream(fps);
     
@@ -642,21 +654,18 @@ export function createRegionController(
     const drawOnce = async () => {
       if (drawing) return;
       drawing = true;
-      // Adapt to viewport if this is a full-screen selection
-      const dynamicW = isFullscreenLike ? window.innerWidth : region.width;
-      const dynamicH = isFullscreenLike ? window.innerHeight : region.height;
-      if (isFullscreenLike) {
-        const targetW = Math.max(2, Math.floor(dynamicW));
-        const targetH = Math.max(2, Math.floor(dynamicH));
-        if (display!.width !== targetW || display!.height !== targetH) {
-          display!.width = targetW;
-          display!.height = targetH;
-        }
-      }
+      
+      // Use precise region coordinates - no dynamic adaptation
       const sx = Math.floor(region.left + window.scrollX);
       const sy = Math.floor(region.top + window.scrollY);
-      const sw = Math.max(1, Math.floor(dynamicW));
-      const sh = Math.max(1, Math.floor(dynamicH));
+      const sw = Math.max(1, Math.ceil(region.width));
+      const sh = Math.max(1, Math.ceil(region.height));
+      
+      // Ensure canvas matches exact region size
+      if (display!.width !== sw || display!.height !== sh) {
+        display!.width = sw;
+        display!.height = sh;
+      }
       const pageBg = getPageBackgroundColor();
       const { values, cleanup } = markFormElementsAndSnapshotValues();
       const snap = await snapshotCroppedArea(sx, sy, sw, sh, {
@@ -668,10 +677,14 @@ export function createRegionController(
           if (el && (el as Element).getAttribute && (el as Element).getAttribute!("data-recorder-overlay") === "1") return true;
           return false;
         },
+
       });
+      
       ctx!.clearRect(0, 0, display!.width, display!.height);
-      ctx!.drawImage(snap, 0, 0, display!.width, display!.height);
-      drawSelectionOverlay(ctx!, sx, sy, display!.width, display!.height);
+      // Draw the snapshot at exact 1:1 scale - no scaling/cropping
+      ctx!.drawImage(snap, 0, 0);
+      // No selection overlay during recording - it's distracting
+      // drawSelectionOverlay(ctx!, sx, sy, display!.width, display!.height);
       // Render captions (last 2 seconds), left-to-right, max 80% width, near bottom with margin
       try {
         ctx!.save();
