@@ -6,6 +6,7 @@ import { createRegionController } from "@/app/lib/recorders";
 import { collectRegionDiagnostics } from "@/app/lib/inspect";
 import { startConsoleCapture } from "@/app/lib/telemetry";
 import { startNetworkMonitoring, stopNetworkMonitoring, type NetworkRequest } from "@/app/lib/network-monitor";
+import { createClientFullUrl } from "@/app/lib/url-utils";
 
 export interface RecorderState {
   status: string;
@@ -22,11 +23,13 @@ export interface RecorderState {
   uploadStatus: "idle" | "uploading" | "success" | "error";
   uploadMessage: string;
   testApiModalOpen: boolean;
+  testApiTitle: string;
   testApiText: string;
   testApiVideo: File | null;
   preUploadedVideoUrl: string | null;
   validationError: string;
   uploadProgress: number;
+  githubIssueUrl: string | null;
 }
 
 export interface RecorderRefs {
@@ -55,16 +58,19 @@ export interface RecorderActions {
   setUploadStatus: (status: "idle" | "uploading" | "success" | "error") => void;
   setUploadMessage: (message: string) => void;
   setTestApiModalOpen: (open: boolean) => void;
+  setTestApiTitle: (title: string) => void;
   setTestApiText: (text: string) => void;
   setTestApiVideo: (file: File | null) => void;
   setPreUploadedVideoUrl: (url: string | null) => void;
   setValidationError: (error: string) => void;
   setUploadProgress: (progress: number) => void;
+  setGithubIssueUrl: (url: string | null) => void;
   onStartRecording: () => Promise<void>;
   onStopRecording: () => Promise<void>;
   onUploadToZerops: () => Promise<void>;
   onCancelRecording: () => Promise<void>;
   resetSelection: () => void;
+  resetGitHubState: () => void;
   pickAreaFlow: () => Promise<void>;
   fullScreenFlow: () => void;
   testApiWithDialog: () => Promise<void>;
@@ -105,11 +111,13 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
   const [uploadStatus, setUploadStatus] = useState<"idle" | "uploading" | "success" | "error">("idle");
   const [uploadMessage, setUploadMessage] = useState("");
   const [testApiModalOpen, setTestApiModalOpen] = useState(false);
+  const [testApiTitle, setTestApiTitle] = useState("");
   const [testApiText, setTestApiText] = useState("");
   const [testApiVideo, setTestApiVideo] = useState<File | null>(null);
   const [preUploadedVideoUrl, setPreUploadedVideoUrl] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string>("");
   const [uploadProgress, setUploadProgress] = useState<number>(0);
+  const [githubIssueUrl, setGithubIssueUrl] = useState<string | null>(null);
 
   // Refs
   const networkRequestsRef = useRef<NetworkRequest[]>([]);
@@ -371,11 +379,11 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
   const uploadVideoToZerops = async (blob: Blob): Promise<string> => {
     setUploadProgress(15);
     
-    console.log("📦 Uploading to Zerops Object Storage:", {
-      blobSize: blob.size,
-      blobType: blob.type,
-      origin: window.location.origin
-    });
+            console.log("📦 Uploading to Zerops Object Storage:", {
+          blobSize: blob.size,
+          blobType: blob.type,
+          baseUrl: createClientFullUrl('/')
+        });
     
     try {
       // Step 1: Get presigned upload URL from our API
@@ -421,7 +429,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
       setUploadProgress(90);
       const timestamp = Date.now();
       const videoId = `zerops-${btoa(key).replace(/[/+=]/g, '')}-${timestamp}`;
-      const localVideoUrl = `${window.location.origin}/video/${videoId}`;
+                const localVideoUrl = createClientFullUrl(`/video/${videoId}`);
       
       console.log("✅ Video ready:", {
         key,
@@ -534,6 +542,16 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     setSelectedTarget(null);
     setSelectedSel(null);
     setStatus("");
+  };
+
+  const resetGitHubState = () => {
+    setGithubIssueUrl(null);
+    setUploadStatus("idle");
+    setUploadMessage("");
+    setDesc("");
+    setTitle("");
+    setPreUploadedVideoUrl(null);
+    setValidationError("");
   };
 
   const pickAreaFlow = async () => {
@@ -683,17 +701,36 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
         url: res.issueUrl,
       });
       
+      // Link the bug report to the GitHub issue
+      try {
+        console.log("🔗 Linking bug report to GitHub issue...");
+        const linkRes = await fetch("/api/update-bug-github", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bugReportId: infoId,
+            githubIssueUrl: res.issueUrl,
+            githubIssueNumber: res.number,
+          }),
+        });
+        
+        if (linkRes.ok) {
+          console.log("✅ Bug report linked to GitHub issue successfully");
+        } else {
+          console.warn("⚠️ Failed to link bug report to GitHub issue (non-critical)");
+        }
+      } catch (linkError) {
+        console.warn("⚠️ Failed to link bug report to GitHub issue:", linkError);
+        // Don't fail the overall process if linking fails
+      }
+      
       setUploadStatus("success");
       setUploadMessage(`Issue created successfully! #${res.number}`);
       setStatus(`Done → ${res.issueUrl}`);
+      setGithubIssueUrl(res.issueUrl);
       
-      setTimeout(() => {
-        setDescModalOpen(false);
-        setUploadStatus("idle");
-        setUploadMessage("");
-        setDesc("");
-        setPreUploadedVideoUrl(null);
-      }, 3000);
+      // Don't auto-close modal anymore - let user preview issue first
+      // The modal will close manually when user clicks cancel or preview
     } catch (error: any) {
       console.error("❌ GitHub issue creation failed:", error);
       setUploadStatus("error");
@@ -706,6 +743,7 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
       setStatus("Testing API...");
       
       const testData = {
+        title: testApiTitle,
         text: testApiText,
         hasVideo: testApiVideo !== null,
         videoName: testApiVideo?.name || null,
@@ -766,11 +804,13 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     uploadStatus,
     uploadMessage,
     testApiModalOpen,
+    testApiTitle,
     testApiText,
     testApiVideo,
     preUploadedVideoUrl,
     validationError,
     uploadProgress,
+    githubIssueUrl,
     
     // Refs
     overlayRef,
@@ -797,16 +837,19 @@ export const RecorderProvider: React.FC<RecorderProviderProps> = ({ children }) 
     setUploadStatus,
     setUploadMessage,
     setTestApiModalOpen,
+    setTestApiTitle,
     setTestApiText,
     setTestApiVideo,
     setPreUploadedVideoUrl,
     setValidationError,
     setUploadProgress,
+    setGithubIssueUrl,
     onStartRecording,
     onStopRecording,
     onUploadToZerops,
     onCancelRecording,
     resetSelection,
+    resetGitHubState,
     pickAreaFlow,
     fullScreenFlow,
     testApiWithDialog,

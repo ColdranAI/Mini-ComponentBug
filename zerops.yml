@@ -10,6 +10,7 @@ zerops:
       base: nodejs@20
       env:
         ALLOWED_ORIGINS: "https://bug.coldran.com"
+        NEXT_PUBLIC_APP_URL: "https://bug.coldran.com"
       ports:
         - port: 3000
           httpSupport: true

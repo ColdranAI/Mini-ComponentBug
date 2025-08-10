@@ -16,6 +16,8 @@ interface BugInfo {
   networkRequests: any[];
   notes: string;
   videoUrl: string;
+  githubIssueUrl?: string;
+  githubIssueNumber?: number;
   summary: {
     totalNetworkRequests: number;
     failedNetworkRequests: number;
@@ -80,6 +82,8 @@ async function getBugInfo(infoId: string): Promise<BugInfo | null> {
       networkRequests: failedRequests,
       notes: bugReport.description,
       videoUrl: bugReport.videoUrl || '',
+      githubIssueUrl: bugReport.githubIssueUrl || undefined,
+      githubIssueNumber: bugReport.githubIssueNumber || undefined,
       summary: {
         totalNetworkRequests: networkCount?.count || 0,
         failedNetworkRequests: failedRequests.filter(req => req.isFailed).length,
@@ -98,12 +102,19 @@ async function getBugInfo(infoId: string): Promise<BugInfo | null> {
 }
 
 export default async function BugInformationPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: infoId } = await params;
-  const bugInfo = await getBugInfo(infoId);
+  try {
+    const { id: infoId } = await params;
+    
+    // Validate the ID format
+    if (!infoId || typeof infoId !== 'string' || infoId.trim() === '') {
+      notFound();
+    }
+    
+    const bugInfo = await getBugInfo(infoId);
 
-  if (!bugInfo) {
-    notFound();
-  }
+    if (!bugInfo) {
+      notFound();
+    }
 
   const formatTimestamp = (timestamp: string) => {
     return new Date(timestamp).toLocaleString('en-US', {
@@ -126,13 +137,19 @@ export default async function BugInformationPage({ params }: { params: Promise<{
 
   // Extract video key from new Zerops format or handle legacy Mux format
   const extractVideoInfo = (videoUrl: string) => {
+    if (!videoUrl || typeof videoUrl !== 'string') {
+      return { type: 'none', key: null, videoId: null };
+    }
+    
     // Check for new Zerops format: zerops-{base64encodedkey}-{timestamp}
     const zeropMatch = videoUrl.match(/zerops-([a-zA-Z0-9]+)-\d+$/);
     if (zeropMatch) {
       try {
-        const key = atob(zeropMatch[1].replace(/[^a-zA-Z0-9]/g, ''));
+        const encodedKey = zeropMatch[1].replace(/[^a-zA-Z0-9]/g, '');
+        const key = atob(encodedKey);
         return { type: 'zerops', key, videoId: videoUrl };
       } catch (e) {
+        console.error("Failed to decode Zerops video key:", e);
         return { type: 'invalid', key: null, videoId: null };
       }
     }
@@ -160,6 +177,25 @@ export default async function BugInformationPage({ params }: { params: Promise<{
               <p className="text-neutral-600">
                 Bug ID: <span className="font-mono text-sm bg-neutral-100 px-2 py-1 rounded">{bugInfo.id}</span>
               </p>
+              {/* GitHub Issue Reference */}
+              {bugInfo.githubIssueUrl && bugInfo.githubIssueNumber && (
+                <div className="mt-3">
+                  <div className="flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2 max-w-fit">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    <span className="font-medium">GitHub Issue:</span>
+                    <a 
+                      href={bugInfo.githubIssueUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="font-mono text-sm hover:underline"
+                    >
+                      #{bugInfo.githubIssueNumber}
+                    </a>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="text-right text-sm text-neutral-500">
               <div>📅 {formatTimestamp(bugInfo.createdAt)}</div>
@@ -203,7 +239,6 @@ export default async function BugInformationPage({ params }: { params: Promise<{
                     <video
                       controls
                       className="w-full h-full"
-                      poster="/video-placeholder.svg"
                     >
                       <source src={`/api/file-url?key=${encodeURIComponent(videoInfo.key!)}&direct=true`} type="video/webm" />
                       Your browser does not support the video tag.
@@ -255,18 +290,13 @@ export default async function BugInformationPage({ params }: { params: Promise<{
                     → Open video in dedicated page
                   </a>
                   {videoInfo.type === 'zerops' && videoInfo.key && (
-                    <button 
-                      onClick={() => {
-                        // Create download link
-                        const link = document.createElement('a');
-                        link.href = `/api/file-url?key=${encodeURIComponent(videoInfo.key!)}&direct=true&download=true`;
-                        link.download = `bug-recording-${bugInfo.id}.webm`;
-                        link.click();
-                      }}
+                    <a 
+                      href={`/api/file-url?key=${encodeURIComponent(videoInfo.key!)}&direct=true&download=true`}
+                      download={`bug-recording-${bugInfo.id}.webm`}
                       className="text-green-600 hover:underline text-sm"
                     >
                       ↓ Download video
-                    </button>
+                    </a>
                   )}
                 </div>
               </div>
@@ -353,4 +383,8 @@ export default async function BugInformationPage({ params }: { params: Promise<{
       </div>
     </div>
   );
+  } catch (error: any) {
+    console.error("❌ Error rendering bug information page:", error);
+    notFound();
+  }
 }

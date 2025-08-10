@@ -20,3 +20,26 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Fix scrolling performance and prevent white flashes */
+html {
+  background: var(--background);
+  overflow-x: hidden;
+}
+
+body {
+  overflow-x: hidden;
+  /* Improve scrolling performance */
+  -webkit-overflow-scrolling: touch;
+  /* Prevent background flashing on scroll */
+  background-attachment: fixed;
+}
+
+/* Ensure overlays don't interfere with scrolling */
+[data-recorder-overlay] {
+  /* Use GPU acceleration for smooth overlays */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  /* Prevent layout thrashing */
+  will-change: transform;
+}

@@ -9,6 +9,8 @@ export const bugReports = pgTable("bug_reports", {
   userAgent: text("user_agent").notNull(),
   videoUrl: text("video_url"),
   status: text("status").default("open").notNull(),
+  githubIssueUrl: text("github_issue_url"),
+  githubIssueNumber: integer("github_issue_number"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   

@@ -15,7 +15,7 @@ export default function HomePage() {
         Cross-browser element recorder using html2canvas → canvas.captureStream() → MediaRecorder.
       </p>
 
-      {status && <div className="mt-2 text-neutral-700">{status}</div>}
+      {/* {status && <div className="mt-2 text-neutral-700">{status}</div>} */}
 
       <textarea 
         className="w-full min-h-[128px] border border-neutral-300 p-2 outline-none focus:ring-2 focus:ring-neutral-500 bg-neutral-50 mt-4"

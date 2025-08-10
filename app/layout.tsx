@@ -18,6 +18,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Mini Component Bug Reporter",
   description: "Cross-browser element recorder using html2canvas → canvas.captureStream() → MediaRecorder.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function RootLayout({
