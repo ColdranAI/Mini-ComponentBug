@@ -2,6 +2,11 @@
 
 <img width="757" height="344" alt="image" src="https://github.com/user-attachments/assets/ba7bd796-b2cd-40bf-ab73-be2a2938dfad" />
 
+
+https://github.com/user-attachments/assets/3dc147d7-52cd-4590-a18f-bdcb48d922c3
+
+
+
 ps: we plan to use rrweb or maybe create our own package for this whole process for the open source community.
 
 ```env
